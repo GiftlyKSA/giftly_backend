@@ -136,11 +136,15 @@ jobs:
         run: |
           # Scan only the layers OUR Dockerfile adds. The base python image
           # legitimately embeds GPG/key strings to verify the CPython source tarball,
-          # so we diff its history out and check what remains.
+          # so we diff its history out and check what remains. Pull the base first so
+          # `docker history python:3.13-slim` works even under buildkit (which does not
+          # populate the classic image store for the FROM image).
+          docker pull python:3.13-slim >/dev/null
           comm -23 \
             <(docker history --no-trunc --format '{{.CreatedBy}}' safe-gift:ci | sort -u) \
             <(docker history --no-trunc --format '{{.CreatedBy}}' python:3.13-slim | sort -u) \
             > our_layers.txt
+          echo "Our image's unique layers:"; cat our_layers.txt
           if grep -Ei "SECRET|KEY|PASSWORD" our_layers.txt; then
             echo "Found a secret-like string in our image layers"; exit 1
           fi
