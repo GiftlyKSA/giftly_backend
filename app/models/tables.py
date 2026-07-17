@@ -64,6 +64,41 @@ _MONEY = Numeric(12, 2)
 _RATE = Numeric(6, 4)
 
 
+class RefreshToken(UUIDPrimaryKeyMixin, Base):
+    """A rotating refresh token, stored only as a SHA-256 hash (SPEC SECTION 17.2 A07).
+
+    Refresh tokens rotate on every use and belong to a ``family_id``. Presenting a
+    token that has already been used (``used_at`` set) or revoked means the family is
+    compromised, so the whole family is revoked and re-auth is forced (reuse
+    detection). The raw token lives only in the client; the DB holds its hash.
+
+    Note:
+        This table is not in SPEC SECTION 10 — the spec mandates rotating refresh
+        tokens with reuse detection but does not define their storage. A dedicated
+        hashed table is the most explicit, auditable option (see DECISIONS.md).
+    """
+
+    __tablename__ = "refresh_tokens"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    family_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_refresh_tokens_hash"),
+        Index("idx_refresh_tokens_family", "family_id"),
+        Index("idx_refresh_tokens_user", "user_id"),
+    )
+
+
 class User(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A marketplace participant (customer, courier, or admin).
 

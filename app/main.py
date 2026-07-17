@@ -62,6 +62,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_exception_handlers(app)
     app.include_router(health.router)
 
+    from app.routers import auth, users
+
+    app.include_router(auth.router)
+    app.include_router(users.router)
+
     if settings.ADMIN_DASHBOARD_ENABLED:
         _register_admin(app)
 

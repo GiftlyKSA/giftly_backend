@@ -49,3 +49,19 @@ explicit / consistent option was chosen) and environment-forced deviations, date
 - **2026-07-17** — The shared async engine, session factory, and Redis client are
   built once in `create_app` and held on `app.state`; admin request handlers open a
   per-request session that commits on success and rolls back on error.
+- **2026-07-17** — Auth (Phase 3): added a `refresh_tokens` table (not in SPEC SECTION
+  10). The spec mandates rotating refresh tokens with families and reuse detection but
+  defines no storage; a dedicated table storing only the SHA-256 hash, family id, and
+  used/revoked timestamps is the most explicit and auditable option. Migration
+  `dadcdbda923c` adds it (reversible; validated up+down).
+- **2026-07-17** — Refresh-token reuse detection must persist even though the request
+  returns 401: the auth service commits the family revoke explicitly before raising,
+  because the per-request session otherwise rolls back on the exception. This is the one
+  place a security side-effect is committed inside a service.
+- **2026-07-17** — A new phone that verifies an OTP receives a short-lived registration
+  token (10 min, `purpose=registration`), not an access token; `/api/auth/register`
+  consumes it. The JWT decoder rejects a registration token where an access token is
+  expected and vice-versa, so the two token types are not interchangeable.
+- **2026-07-17** — `email` is validated with a constrained-string pattern rather than
+  Pydantic `EmailStr` to avoid adding the `email-validator` dependency for a field used
+  only for the invoice-paid receipt.

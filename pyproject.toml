@@ -67,6 +67,10 @@ ignore = [
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection markers are called in argument defaults by design.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Path", "fastapi.Form", "fastapi.Header"]
+
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
