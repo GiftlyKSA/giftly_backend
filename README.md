@@ -6,12 +6,15 @@ builds an itemised invoice, the customer pays into platform escrow, and funds re
 to the courier only after geofenced, photo-proven delivery is approved. This repository
 is the backend, admin dashboard, and documentation — there is no mobile/web client here.
 
-> Build status: the foundational layers are implemented and green — configuration and
-> the production safety interlock, the money/pricing/crypto engines, structured logging
-> with scrubbing, the error envelope, health endpoints, the full data layer (22 tables,
-> constraints, indexes, ledger/immutability triggers, system-wallet seed), and the
-> integration doubles. See `DECISIONS.md` for scope notes and the remaining phases in
-> the master spec (SECTION 25).
+> Build status: implemented and green — configuration and the production safety
+> interlock, the money/pricing/crypto engines, structured logging with scrubbing, the
+> error envelope, health endpoints, the full data layer (22 tables, constraints,
+> indexes, ledger/immutability triggers, system-wallet seed), the integration doubles,
+> the OTP/session/CSRF security primitives, and the **server-rendered admin dashboard**
+> (auth, CSRF, step-up, and every page in `docs/endpoints/admin.md`). Phases still to
+> come: the auth API, the money/ledger service, the promo engine, orders, invoices,
+> payments, the receipt email, delivery/approval/payout, chat, and background jobs. See
+> `DECISIONS.md` for scope notes and the master spec (SECTION 25) for the phase order.
 
 ## Architecture
 

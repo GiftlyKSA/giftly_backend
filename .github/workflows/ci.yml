@@ -134,6 +134,13 @@ jobs:
           test "$uid" != "0"
       - name: Assert no secrets leak into image history
         run: |
-          if docker history --no-trunc safe-gift:ci | grep -Ei "SECRET|KEY|PASSWORD"; then
-            echo "Found a secret-like string in image history"; exit 1
+          # Scan only the layers OUR Dockerfile adds. The base python image
+          # legitimately embeds GPG/key strings to verify the CPython source tarball,
+          # so we diff its history out and check what remains.
+          comm -23 \
+            <(docker history --no-trunc --format '{{.CreatedBy}}' safe-gift:ci | sort -u) \
+            <(docker history --no-trunc --format '{{.CreatedBy}}' python:3.13-slim | sort -u) \
+            > our_layers.txt
+          if grep -Ei "SECRET|KEY|PASSWORD" our_layers.txt; then
+            echo "Found a secret-like string in our image layers"; exit 1
           fi
