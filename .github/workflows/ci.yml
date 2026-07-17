@@ -1,0 +1,139 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen --all-extras --dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy app
+
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:16-3.4
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    env:
+      # Dummies only, in plain sight — never repository secrets. In ENVIRONMENT=test
+      # the client factory returns Fakes, so the suite cannot reach Paylink or sndr.
+      ENVIRONMENT: test
+      DEBUG: "false"
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: "test-jwt-secret-value-not-real-000000000000"
+      JWT_ALGORITHM: HS256
+      JWT_ACCESS_TTL_MINUTES: "30"
+      JWT_REFRESH_TTL_DAYS: "30"
+      JWT_ISSUER: safe-gift-test
+      JWT_AUDIENCE: safe-gift-test
+      FIELD_ENCRYPTION_KEYS: '{"1":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}'
+      FIELD_ENCRYPTION_KEY_VERSION: "1"
+      IDENTITY_FINGERPRINT_PEPPER: "test-pepper-value-not-real-0000000000000"
+      ADMIN_SESSION_SECRET: "test-admin-session-secret-not-real-00000"
+      CORS_ALLOWED_ORIGINS: "http://localhost:3000"
+      # NO PAYLINK_*. NO SNDR_*. NO AWS_*. Deliberately absent.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen --all-extras --dev
+      - name: Enable PostGIS + pgcrypto
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d postgres \
+            -c "CREATE EXTENSION IF NOT EXISTS postgis; CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+      - run: uv run alembic upgrade head
+      - run: uv run pytest -q --cov=app --cov-report=xml --cov-fail-under=85
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen --dev
+      - run: uvx pip-audit --strict
+
+  docs:
+    runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: development
+      DEBUG: "true"
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/postgres
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: "test-jwt-secret-value-not-real-000000000000"
+      JWT_ALGORITHM: HS256
+      FIELD_ENCRYPTION_KEYS: '{"1":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}'
+      FIELD_ENCRYPTION_KEY_VERSION: "1"
+      IDENTITY_FINGERPRINT_PEPPER: "test-pepper-value-not-real-0000000000000"
+      CORS_ALLOWED_ORIGINS: "http://localhost:3000"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen --dev
+      - run: uv run python -m app.export_openapi
+      - name: Fail if the committed OpenAPI spec is stale
+        run: git diff --exit-code docs/openapi.json
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the deployment image
+        run: docker build -t safe-gift:ci .
+      - name: Assert the image runs as non-root
+        run: |
+          uid=$(docker run --rm safe-gift:ci id -u)
+          test "$uid" != "0"
+      - name: Assert no secrets leak into image history
+        run: |
+          if docker history --no-trunc safe-gift:ci | grep -Ei "SECRET|KEY|PASSWORD"; then
+            echo "Found a secret-like string in image history"; exit 1
+          fi

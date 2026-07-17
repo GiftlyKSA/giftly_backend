@@ -1,0 +1,1 @@
+"""SAFE-GIFT storage integration."""

@@ -1,0 +1,1 @@
+"""SAFE-GIFT application package."""

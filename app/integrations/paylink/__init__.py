@@ -1,0 +1,1 @@
+"""SAFE-GIFT paylink integration."""
