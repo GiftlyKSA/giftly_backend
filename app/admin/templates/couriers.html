@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Couriers pending verification</h1>
+<table class="list">
+  <thead><tr><th>User</th><th>City</th><th>Created</th></tr></thead>
+  <tbody>{% for p in pending %}
+    <tr><td><a href="/admin/couriers/{{ p.user_id }}">{{ p.user_id }}</a></td>
+        <td>{{ p.city_of_residence }}</td><td>{{ p.created_at }}</td></tr>
+  {% else %}<tr><td colspan="3">None pending.</td></tr>{% endfor %}</tbody>
+</table>
+{% endblock %}

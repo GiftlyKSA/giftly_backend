@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Order</h1>
+{% if not order %}<p>Not found.</p>{% else %}
+<section class="card"><table>
+  <tr><td>ID</td><td>{{ order.id }}</td></tr>
+  <tr><td>Status</td><td>{{ order.status }}</td></tr>
+  <tr><td>City</td><td>{{ order.delivery_city }}</td></tr>
+  <tr><td>Delivery date</td><td>{{ order.delivery_date }}</td></tr>
+  <tr><td>Total</td><td class="num">{{ order.total_amount }}</td></tr>
+  <tr><td>Commission</td><td class="num">{{ order.commission_amount }}</td></tr>
+  <tr><td>Courier payout</td><td class="num">{{ order.courier_payout_amount }}</td></tr>
+</table></section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>New promo</h1>
+<form method="post" action="/admin/promos" class="card narrow">
+  <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
+  <label>Code<input name="code" required></label>
+  <label>Description<input name="description" required></label>
+  <label>Type
+    <select name="discount_type"><option value="PERCENT">PERCENT</option><option value="FIXED">FIXED</option></select>
+  </label>
+  <label>Percent value<input name="percent_value" placeholder="10.00"></label>
+  <label>Fixed amount<input name="fixed_amount" placeholder="50.00"></label>
+  <label>Max discount<input name="max_discount_amount" placeholder="100.00"></label>
+  <label>Min order<input name="min_order_amount" value="0.00"></label>
+  <label>Max total usages<input name="max_total_usages" placeholder="blank = unlimited"></label>
+  <label>Max per user<input name="max_usages_per_user" value="1"></label>
+  <button type="submit">Create (requires step-up)</button>
+</form>
+<form method="post" action="/admin/step-up/request">
+  <input type="hidden" name="next" value="/admin/promos/new">
+  <button type="submit">Step-up first</button>
+</form>
+{% endblock %}

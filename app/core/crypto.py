@@ -98,3 +98,8 @@ class FieldCipher:
 def build_aad(table: str, column: str, entity_id: str) -> str:
     """Build the AAD context string that binds a ciphertext to its row and column."""
     return f"{table}:{column}:{entity_id}"
+
+
+def build_cipher(keys: dict[int, bytes], active_version: int) -> FieldCipher:
+    """Construct a :class:`FieldCipher` from a decoded key map and active version."""
+    return FieldCipher(keys=keys, active_version=active_version)

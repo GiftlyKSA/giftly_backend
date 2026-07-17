@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Wallets</h1>
+<table class="list">
+  <thead><tr><th>Wallet</th><th>Type</th><th>Balance</th><th>Held</th></tr></thead>
+  <tbody>{% for w in wallets %}
+    <tr><td><a href="/admin/wallets/{{ w.id }}">{{ w.id }}</a></td><td>{{ w.type }}</td>
+        <td class="num">{{ w.balance }}</td><td class="num">{{ w.held_balance }}</td></tr>
+  {% else %}<tr><td colspan="4">No wallets.</td></tr>{% endfor %}</tbody>
+</table>
+{% endblock %}

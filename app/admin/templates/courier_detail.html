@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Courier {{ profile.user_id if profile else "" }}</h1>
+{% if not profile %}<p>Not found.</p>{% else %}
+<section class="card">
+  <table>
+    <tr><td>City</td><td>{{ profile.city_of_residence }}</td></tr>
+    <tr><td>Verified</td><td>{{ profile.is_verified }}</td></tr>
+    <tr><td>Status</td><td>{{ user.status if user else "?" }}</td></tr>
+    <tr><td>National ID</td><td>{% if revealed %}<code>{{ revealed.national_id }}</code>{% else %}••••••••{% endif %}</td></tr>
+    <tr><td>Passport</td><td>{% if revealed %}<code>{{ revealed.passport_id }}</code>{% else %}••••••••{% endif %}</td></tr>
+  </table>
+</section>
+<div class="actions">
+  <form method="post" action="/admin/couriers/{{ profile.user_id }}/verify">
+    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
+    <input type="hidden" name="decision" value="approve">
+    <input name="note" placeholder="note (optional)">
+    <button type="submit">Approve</button>
+  </form>
+  <form method="post" action="/admin/couriers/{{ profile.user_id }}/verify">
+    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
+    <input type="hidden" name="decision" value="reject">
+    <button type="submit" class="danger">Reject</button>
+  </form>
+  <form method="post" action="/admin/couriers/{{ profile.user_id }}/reveal-identity">
+    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
+    <button type="submit">Reveal identity</button>
+  </form>
+  <form method="post" action="/admin/step-up/request">
+    <input type="hidden" name="next" value="/admin/couriers/{{ profile.user_id }}">
+    <button type="submit">Step-up</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

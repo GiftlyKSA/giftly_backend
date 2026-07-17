@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Withdrawals</h1>
+<table class="list">
+  <thead><tr><th>Courier</th><th>Amount</th><th>IBAN</th><th>Status</th></tr></thead>
+  <tbody>{% for w in withdrawals %}
+    <tr><td>{{ w.courier_id }}</td><td class="num">{{ w.amount }}</td>
+        <td>••••{{ w.iban_last4 }}</td><td>{{ w.status }}</td></tr>
+  {% else %}<tr><td colspan="4">No withdrawals.</td></tr>{% endfor %}</tbody>
+</table>
+<p class="note">Processing a withdrawal moves money and is performed through the ledger
+service. IBANs are masked; a full reveal requires step-up.</p>
+{% endblock %}

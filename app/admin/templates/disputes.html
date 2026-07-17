@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Disputes</h1>
+<table class="list">
+  <thead><tr><th>Dispute</th><th>Order</th><th>Status</th><th>Created</th></tr></thead>
+  <tbody>{% for d in disputes %}
+    <tr><td><a href="/admin/disputes/{{ d.id }}">{{ d.id }}</a></td><td>{{ d.order_id }}</td>
+        <td>{{ d.status }}</td><td>{{ d.created_at }}</td></tr>
+  {% else %}<tr><td colspan="4">No disputes.</td></tr>{% endfor %}</tbody>
+</table>
+{% endblock %}

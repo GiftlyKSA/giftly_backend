@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Promo {{ promo.code if promo else "" }}</h1>
+{% if not promo %}<p>Not found.</p>{% else %}
+<section class="card"><table>
+  <tr><td>Description</td><td>{{ promo.description }}</td></tr>
+  <tr><td>Type</td><td>{{ promo.discount_type }}</td></tr>
+  <tr><td>Percent</td><td>{{ promo.percent_value }}</td></tr>
+  <tr><td>Fixed</td><td>{{ promo.fixed_amount }}</td></tr>
+  <tr><td>Used</td><td class="num">{{ promo.used_count }}</td></tr>
+  <tr><td>Active</td><td>{{ promo.is_active }}</td></tr>
+</table></section>
+<div class="actions">
+  <a class="btn" href="/admin/promos/{{ promo.id }}/redemptions">Redemptions</a>
+  <form method="post" action="/admin/promos/{{ promo.id }}/activate">
+    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}"><button type="submit">Activate</button></form>
+  <form method="post" action="/admin/promos/{{ promo.id }}/deactivate">
+    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}"><button type="submit" class="danger">Deactivate</button></form>
+  <form method="post" action="/admin/step-up/request">
+    <input type="hidden" name="next" value="/admin/promos/{{ promo.id }}"><button type="submit">Step-up</button></form>
+</div>
+{% endif %}
+{% endblock %}

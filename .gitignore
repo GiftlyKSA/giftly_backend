@@ -22,3 +22,6 @@ pgdata/
 .DS_Store
 .idea/
 .vscode/
+
+# Redis snapshots
+*.rdb

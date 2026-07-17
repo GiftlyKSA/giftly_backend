@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Dispute</h1>
+{% if not dispute %}<p>Not found.</p>{% else %}
+<section class="card"><table>
+  <tr><td>Order</td><td>{{ dispute.order_id }}</td></tr>
+  <tr><td>Status</td><td>{{ dispute.status }}</td></tr>
+  <tr><td>Reason</td><td>{{ dispute.reason }}</td></tr>
+</table></section>
+<p class="note">Resolving a dispute moves escrow funds and is performed through the
+ledger service (not this dashboard) so money never moves outside the double-entry
+ledger.</p>
+{% endif %}
+{% endblock %}

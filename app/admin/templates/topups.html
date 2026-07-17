@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Top-ups</h1>
+<table class="list">
+  <thead><tr><th>Intent</th><th>User</th><th>Amount</th><th>Status</th><th>Created</th></tr></thead>
+  <tbody>{% for t in topups %}
+    <tr><td>{{ t.id }}</td><td>{{ t.user_id }}</td><td class="num">{{ t.amount }}</td>
+        <td>{{ t.status }}</td><td>{{ t.created_at }}</td></tr>
+  {% else %}<tr><td colspan="5">No top-ups.</td></tr>{% endfor %}</tbody>
+</table>
+{% endblock %}

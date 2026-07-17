@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Orders</h1>
+<table class="list">
+  <thead><tr><th>Order</th><th>Status</th><th>City</th><th>Total</th><th>Created</th></tr></thead>
+  <tbody>{% for o in orders %}
+    <tr><td><a href="/admin/orders/{{ o.id }}">{{ o.id }}</a></td><td>{{ o.status }}</td>
+        <td>{{ o.delivery_city }}</td><td class="num">{{ o.total_amount }}</td><td>{{ o.created_at }}</td></tr>
+  {% else %}<tr><td colspan="5">No orders.</td></tr>{% endfor %}</tbody>
+</table>
+{% endblock %}

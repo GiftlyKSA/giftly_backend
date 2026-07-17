@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Redemptions</h1>
+<table class="list">
+  <thead><tr><th>User</th><th>Invoice</th><th>Amount</th><th>Status</th></tr></thead>
+  <tbody>{% for r in redemptions %}
+    <tr><td>{{ r.user_id }}</td><td>{{ r.invoice_id }}</td><td class="num">{{ r.discount_amount }}</td><td>{{ r.status }}</td></tr>
+  {% else %}<tr><td colspan="4">None.</td></tr>{% endfor %}</tbody>
+</table>
+{% endblock %}

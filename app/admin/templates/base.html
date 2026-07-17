@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SAFE-GIFT Admin{% endblock %}</title>
+  <link rel="stylesheet" href="/admin/static/admin.css">
+</head>
+<body>
+{% if ctx %}
+<header class="topbar">
+  <span class="brand">SAFE-GIFT admin</span>
+  <nav>
+    <a href="/admin">Overview</a>
+    <a href="/admin/couriers">Couriers</a>
+    <a href="/admin/orders">Orders</a>
+    <a href="/admin/invoices">Invoices</a>
+    <a href="/admin/promos">Promos</a>
+    <a href="/admin/disputes">Disputes</a>
+    <a href="/admin/withdrawals">Withdrawals</a>
+    <a href="/admin/wallets">Wallets</a>
+    <a href="/admin/topups">Top-ups</a>
+    <a href="/admin/audit-logs">Audit</a>
+  </nav>
+  <form method="post" action="/admin/logout" class="logout">
+    <button type="submit">Sign out</button>
+  </form>
+</header>
+{% endif %}
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

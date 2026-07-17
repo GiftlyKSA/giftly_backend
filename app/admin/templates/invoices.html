@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Invoices</h1>
+<table class="list">
+  <thead><tr><th>Invoice</th><th>Status</th><th>Total</th><th>Created</th></tr></thead>
+  <tbody>{% for i in invoices %}
+    <tr><td><a href="/admin/invoices/{{ i.id }}">{{ i.id }}</a></td><td>{{ i.status }}</td>
+        <td class="num">{{ i.total_amount }}</td><td>{{ i.created_at }}</td></tr>
+  {% else %}<tr><td colspan="4">No invoices.</td></tr>{% endfor %}</tbody>
+</table>
+{% endblock %}

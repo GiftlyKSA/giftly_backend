@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Overview</h1>
+<div class="grid">
+  <section class="card"><h2>Orders by status</h2>
+    <table>{% for status, count in overview.order_counts.items() %}
+      <tr><td>{{ status }}</td><td class="num">{{ count }}</td></tr>{% endfor %}</table>
+  </section>
+  <section class="card"><h2>Attention</h2>
+    <table>
+      <tr><td>Open disputes</td><td class="num">{{ overview.open_disputes }}</td></tr>
+      <tr><td>Pending withdrawals</td><td class="num">{{ overview.pending_withdrawals }}</td></tr>
+    </table>
+  </section>
+  <section class="card"><h2>System balances (SAR)</h2>
+    <table>{% for wtype, bal in overview.system_balances.items() %}
+      <tr><td>{{ wtype }}</td><td class="num">{{ bal }}</td></tr>{% endfor %}</table>
+  </section>
+</div>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Wallet</h1>
+{% if not wallet %}<p>Not found.</p>{% else %}
+<section class="card"><table>
+  <tr><td>ID</td><td>{{ wallet.id }}</td></tr>
+  <tr><td>Type</td><td>{{ wallet.type }}</td></tr>
+  <tr><td>Balance</td><td class="num">{{ wallet.balance }}</td></tr>
+  <tr><td>Held</td><td class="num">{{ wallet.held_balance }}</td></tr>
+</table></section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Promos <a class="btn" href="/admin/promos/new">New</a></h1>
+<table class="list">
+  <thead><tr><th>Code</th><th>Type</th><th>Active</th><th>Used</th><th>Cap</th></tr></thead>
+  <tbody>{% for p in promos %}
+    <tr><td><a href="/admin/promos/{{ p.id }}">{{ p.code }}</a></td><td>{{ p.discount_type }}</td>
+        <td>{{ p.is_active }}</td><td class="num">{{ p.used_count }}</td>
+        <td class="num">{{ p.max_total_usages if p.max_total_usages is not none else "∞" }}</td></tr>
+  {% else %}<tr><td colspan="5">No promos.</td></tr>{% endfor %}</tbody>
+</table>
+{% endblock %}
