@@ -79,3 +79,17 @@ explicit / consistent option was chosen) and environment-forced deviations, date
 - **2026-07-17** — Reconciliation checks both invariants over SETTLED rows only, so an
   in-flight PENDING escrow hold (a lone leg not yet settled) never trips the
   per-correlation zero-sum check; once the hold settles, its group balances to 0.00.
+- **2026-07-17** — Promo engine (Phase 5): `PromoService.reserve` uses the atomic
+  conditional UPDATE (§12.3) — a single `UPDATE ... WHERE ... used_count < cap RETURNING
+  used_count` — so the "first 20" global cap can never be overshot by concurrent
+  requests. The per-user cap is checked in the same transaction after the UPDATE has
+  row-locked the promo; over-limit raises and rolls back the increment. Verified by the
+  mandated 50-parallel-against-20 concurrency test.
+- **2026-07-17** — The pure discount math is exposed as `core.pricing.compute_promo_discount`
+  and reused by both the promo engine and (in Phase 7) the invoice pipeline, so the two
+  never disagree on a discount.
+- **2026-07-17** — `POST /api/promos/validate {code, order_id}` (the HTTP validate
+  endpoint) is deferred to Phase 7: the discountable base comes from the order's active
+  invoice, which the invoice service creates. The promo service's `validate(code, base,
+  user_id)` is the reusable core and is fully tested now; the router wraps it once the
+  invoice base exists.

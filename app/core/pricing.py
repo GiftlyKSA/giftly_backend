@@ -143,6 +143,16 @@ def _compute_discount(discountable: Decimal, promo: PricingPromo | None) -> Deci
     return min(d, discountable)
 
 
+def compute_promo_discount(discountable: Decimal, promo: PricingPromo) -> Decimal:
+    """Compute the promo discount for a given discountable base (public wrapper).
+
+    The promo engine uses this to preview and reserve a discount without running the
+    full pricing pipeline; the invoice pipeline uses the same logic internally so the
+    two never disagree.
+    """
+    return _compute_discount(discountable, promo)
+
+
 def _allocate_discount(
     line_nets: list[Decimal],
     courier_fee_net: Decimal,

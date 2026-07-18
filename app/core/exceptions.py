@@ -94,3 +94,56 @@ class RateLimitedError(DomainError):
         """Record the retry-after hint for the ``Retry-After`` header."""
         super().__init__(message)
         self.retry_after_seconds = retry_after_seconds
+
+
+class PromoError(ValidationDomainError):
+    """Base for promo validation failures (SPEC SECTION 12.2); all are 422."""
+
+
+class PromoNotFoundError(PromoError):
+    """No promo exists for the normalized code."""
+
+    code = "PROMO_NOT_FOUND"
+    message = "This promo code is not recognised."
+
+
+class PromoInactiveError(PromoError):
+    """The promo exists but is deactivated."""
+
+    code = "PROMO_INACTIVE"
+    message = "This promo code is not active."
+
+
+class PromoNotStartedError(PromoError):
+    """The promo's start time is in the future."""
+
+    code = "PROMO_NOT_STARTED"
+    message = "This promo code is not available yet."
+
+
+class PromoExpiredError(PromoError):
+    """The promo's end time has passed."""
+
+    code = "PROMO_EXPIRED"
+    message = "This promo code has expired."
+
+
+class PromoMinOrderNotMetError(PromoError):
+    """The order value is below the promo's minimum."""
+
+    code = "PROMO_MIN_ORDER_NOT_MET"
+    message = "Your order does not meet this promo's minimum amount."
+
+
+class PromoUsageExceededError(PromoError):
+    """The promo's global usage cap has been reached."""
+
+    code = "PROMO_USAGE_EXCEEDED"
+    message = "This promo code is no longer available."
+
+
+class PromoUserLimitReachedError(PromoError):
+    """This user has already used the promo the maximum number of times."""
+
+    code = "PROMO_USER_LIMIT_REACHED"
+    message = "You have already used this promo code."
