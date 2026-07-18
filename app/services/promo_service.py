@@ -38,8 +38,12 @@ class PromoValidation:
     discount_amount: Decimal
 
 
-def _to_pricing_promo(promo: Promo) -> PricingPromo:
-    """Adapt an ORM promo to the pure pricing engine's promo value object."""
+def to_pricing_promo(promo: Promo) -> PricingPromo:
+    """Adapt an ORM promo to the pure pricing engine's promo value object.
+
+    Public so the invoice pipeline can run the full pricing engine with the same promo
+    value object the promo engine validated, keeping the two in lock-step.
+    """
     kind = (
         PromoDiscountKind.PERCENT
         if promo.discount_type is PromoDiscountType.PERCENT
@@ -92,7 +96,7 @@ class PromoService:
         user_uses = await self._promos.count_user_redemptions(promo.id, user_id)
         if user_uses >= promo.max_usages_per_user:
             raise PromoUserLimitReachedError
-        discount = compute_promo_discount(discountable_base, _to_pricing_promo(promo))
+        discount = compute_promo_discount(discountable_base, to_pricing_promo(promo))
         return PromoValidation(promo=promo, discount_amount=discount)
 
     async def reserve(

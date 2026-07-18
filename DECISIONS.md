@@ -108,3 +108,28 @@ explicit / consistent option was chosen) and environment-forced deviations, date
 - **2026-07-18** — Order broadcast to city couriers is deferred to Phase 13
   (notifications); the radar (`GET /api/orders/available`) already lets couriers find
   new orders without push, so the flow is complete without it.
+- **2026-07-18** — Invoices (Phase 7): the courier authors items + a net courier fee and,
+  optionally, the customer's promo code; the platform computes every other leg through the
+  single pricing engine (`core/pricing.py`). The golden worked example (655.50) is the
+  regression anchor. Because the `enforce_invoice_item_freeze` trigger forbids item writes
+  once an invoice leaves DRAFT, an invoice is created DRAFT, lined, has its promo reserved,
+  then transitioned to ISSUED in one transaction; the order moves `ASSIGNED ->
+  WAITING_PAYMENT`. `PAYMENT_EXPIRY_HOURS` sets the ISSUED `expires_at`.
+- **2026-07-18** — Invoices are immutable once issued: applying a different promo is not an
+  edit. A courier `POST /api/invoices/{id}/cancel` releases the promo and reopens the order
+  (`WAITING_PAYMENT -> ASSIGNED`) so a corrected invoice is a NEW row, never a mutation.
+  The partial unique index `uq_invoices_one_active_per_order` keeps at most one active
+  invoice per order, so a second create returns 409 CONFLICT.
+- **2026-07-18** — A promo supplied at invoice creation is validated and reserved against
+  the **customer** (`order.customer_id`), not the courier — the per-user cap tracks the
+  beneficiary. A code that rounds to a 0.00 discount is rejected (422), never stored,
+  keeping the `chk_invoice_promo_pairing` invariant (promo_id set <=> discount > 0).
+- **2026-07-18** — `POST /api/promos/validate {code, order_id}` (deferred from Phase 5) is
+  now delivered as a pure customer preview: it re-runs the pricing engine over the order's
+  active-invoice lines with the candidate promo and returns the discount + resulting total,
+  reserving nothing. `core.promo_service.to_pricing_promo` was made public so the invoice
+  pipeline and the preview build the exact promo value object the promo engine validated.
+- **2026-07-18** — Invoice ownership is enforced in the query, consistent with orders: a
+  non-participant courier gets 404 on create (via `get_for_actor`), and cancel uses a
+  courier-scoped `SELECT ... FOR UPDATE` (`lock_for_courier`) so a non-issuer gets 404
+  (no existence leak) rather than 403.

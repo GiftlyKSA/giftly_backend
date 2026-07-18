@@ -58,6 +58,47 @@
         "title": "ConfirmResponse",
         "type": "object"
       },
+      "CreateInvoiceRequest": {
+        "additionalProperties": false,
+        "description": "Author and issue an invoice for an order.",
+        "properties": {
+          "courier_fee_amount": {
+            "default": "0.00",
+            "description": "Courier's craft/labour, net.",
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Courier Fee Amount",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceLineRequest"
+            },
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "promo_code": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promo Code"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "CreateInvoiceRequest",
+        "type": "object"
+      },
       "CreateOrderRequest": {
         "additionalProperties": false,
         "description": "Create a gift-request order.",
@@ -129,6 +170,237 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InvoiceItemResponse": {
+        "description": "A single computed invoice line, as stored.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "line_discount_amount": {
+            "title": "Line Discount Amount",
+            "type": "string"
+          },
+          "line_net_amount": {
+            "title": "Line Net Amount",
+            "type": "string"
+          },
+          "line_tax_amount": {
+            "title": "Line Tax Amount",
+            "type": "string"
+          },
+          "line_taxable_amount": {
+            "title": "Line Taxable Amount",
+            "type": "string"
+          },
+          "line_total_amount": {
+            "title": "Line Total Amount",
+            "type": "string"
+          },
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "tax_rate": {
+            "title": "Tax Rate",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "unit_price_amount": {
+            "title": "Unit Price Amount",
+            "type": "string"
+          }
+        },
+        "required": [
+          "position",
+          "title",
+          "description",
+          "unit_price_amount",
+          "quantity",
+          "tax_rate",
+          "line_net_amount",
+          "line_discount_amount",
+          "line_taxable_amount",
+          "line_tax_amount",
+          "line_total_amount"
+        ],
+        "title": "InvoiceItemResponse",
+        "type": "object"
+      },
+      "InvoiceLineRequest": {
+        "additionalProperties": false,
+        "description": "One courier-authored invoice line (net of tax).",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "quantity": {
+            "maximum": 999.0,
+            "minimum": 1.0,
+            "title": "Quantity",
+            "type": "integer"
+          },
+          "tax_rate": {
+            "default": "0.15",
+            "description": "Tax fraction, e.g. \"0.15\" for 15%.",
+            "maxLength": 8,
+            "minLength": 1,
+            "title": "Tax Rate",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          },
+          "unit_price_amount": {
+            "description": "Net unit price, e.g. \"400.00\".",
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Unit Price Amount",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "unit_price_amount",
+          "quantity"
+        ],
+        "title": "InvoiceLineRequest",
+        "type": "object"
+      },
+      "InvoiceResponse": {
+        "description": "A full invoice view for its participants (every amount server-computed).",
+        "properties": {
+          "courier_fee_amount": {
+            "title": "Courier Fee Amount",
+            "type": "string"
+          },
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "discount_amount": {
+            "title": "Discount Amount",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "issued_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issued At"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InvoiceItemResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "items_net_amount": {
+            "title": "Items Net Amount",
+            "type": "string"
+          },
+          "net_after_discount_amount": {
+            "title": "Net After Discount Amount",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "promo_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promo Code"
+          },
+          "service_fee_amount": {
+            "title": "Service Fee Amount",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "tax_amount": {
+            "title": "Tax Amount",
+            "type": "string"
+          },
+          "total_amount": {
+            "title": "Total Amount",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "order_id",
+          "status",
+          "currency",
+          "items_net_amount",
+          "courier_fee_amount",
+          "service_fee_amount",
+          "discount_amount",
+          "net_after_discount_amount",
+          "tax_amount",
+          "total_amount",
+          "promo_code",
+          "issued_at",
+          "expires_at",
+          "items"
+        ],
+        "title": "InvoiceResponse",
         "type": "object"
       },
       "OrderDetail": {
@@ -306,6 +578,58 @@
           "created_at"
         ],
         "title": "OrderSummary",
+        "type": "object"
+      },
+      "PromoPreviewResponse": {
+        "description": "A previewed promo discount and the total it would produce.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "discount_amount": {
+            "title": "Discount Amount",
+            "type": "string"
+          },
+          "original_total_amount": {
+            "title": "Original Total Amount",
+            "type": "string"
+          },
+          "total_amount": {
+            "title": "Total Amount",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "discount_amount",
+          "original_total_amount",
+          "total_amount"
+        ],
+        "title": "PromoPreviewResponse",
+        "type": "object"
+      },
+      "PromoValidateRequest": {
+        "additionalProperties": false,
+        "description": "Preview a promo against an order's active invoice.",
+        "properties": {
+          "code": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "order_id": {
+            "description": "The order whose active invoice to price against.",
+            "title": "Order Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "order_id"
+        ],
+        "title": "PromoValidateRequest",
         "type": "object"
       },
       "RefreshRequest": {
@@ -1193,6 +1517,94 @@
         ]
       }
     },
+    "/api/invoices/{invoice_id}": {
+      "get": {
+        "description": "Return an invoice by id (participant only).",
+        "operationId": "get_invoice_api_invoices__invoice_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Invoice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Invoice",
+        "tags": [
+          "invoices"
+        ]
+      }
+    },
+    "/api/invoices/{invoice_id}/cancel": {
+      "post": {
+        "description": "Cancel an unpaid issued invoice, reopening the order (issuing courier only).",
+        "operationId": "cancel_invoice_api_invoices__invoice_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Invoice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Invoice",
+        "tags": [
+          "invoices"
+        ]
+      }
+    },
     "/api/media/confirm": {
       "post": {
         "description": "Confirm an uploaded object exists and is a valid image.",
@@ -1596,6 +2008,146 @@
         "summary": "Cancel Order",
         "tags": [
           "orders"
+        ]
+      }
+    },
+    "/api/orders/{order_id}/invoice": {
+      "get": {
+        "description": "Return an order's active invoice (participant only).",
+        "operationId": "get_order_invoice_api_orders__order_id__invoice_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Order Invoice",
+        "tags": [
+          "invoices"
+        ]
+      }
+    },
+    "/api/orders/{order_id}/invoices": {
+      "post": {
+        "description": "Author and issue an invoice for an order (assigned courier only).",
+        "operationId": "create_invoice_api_orders__order_id__invoices_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInvoiceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvoiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Invoice",
+        "tags": [
+          "invoices"
+        ]
+      }
+    },
+    "/api/promos/validate": {
+      "post": {
+        "description": "Preview a promo against the customer's own order's active invoice.",
+        "operationId": "validate_promo_api_promos_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoValidateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromoPreviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Promo",
+        "tags": [
+          "promos"
         ]
       }
     },
