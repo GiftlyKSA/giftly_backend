@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import itertools
+import secrets
 from decimal import Decimal
 
 from app.core.config import Environment
@@ -26,17 +27,20 @@ class FakePaylinkClient(PaymentGateway):
         environment: Environment,
         webhook_secret: str = "test-webhook-secret",  # noqa: S107 — non-secret test default
     ) -> None:
-        """Refuse construction in production and seed a deterministic counter."""
+        """Refuse construction in production and seed a per-instance unique counter."""
         forbid_in_production(environment, type(self).__name__)
         self._counter = itertools.count(1)
+        # A random per-instance prefix keeps transaction numbers globally unique across
+        # app instances (real gateway txns are unique; the DB has a unique index on them).
+        self._prefix = secrets.token_hex(4)
         self._webhook_secret = webhook_secret.encode("utf-8")
         self.charges: dict[str, Decimal] = {}
 
     async def create_charge(
         self, *, amount: Decimal, order_number: str, callback_url: str
     ) -> GatewayCharge:
-        """Return a deterministic transaction number and a local simulate URL."""
-        txn = f"FAKE-TXN-{next(self._counter):08d}"
+        """Return a unique transaction number and a local simulate URL."""
+        txn = f"FAKE-TXN-{self._prefix}-{next(self._counter):08d}"
         self.charges[txn] = amount
         return GatewayCharge(
             transaction_no=txn,

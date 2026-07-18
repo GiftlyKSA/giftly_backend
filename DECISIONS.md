@@ -133,3 +133,25 @@ explicit / consistent option was chosen) and environment-forced deviations, date
   non-participant courier gets 404 on create (via `get_for_actor`), and cancel uses a
   courier-scoped `SELECT ... FOR UPDATE` (`lock_for_courier`) so a non-issuer gets 404
   (no existence leak) rather than 403.
+- **2026-07-18** — Payments (Phase 8): a paid invoice's total moves into `SYSTEM_ESCROW`,
+  sourced from the customer's wallet and the gateway (`-wallet -gateway +total == 0`), held
+  there until delivery/approval (Phase 10). The promo subsidy is injected at payout, not at
+  payment, so escrow holds exactly what the customer paid — this keeps the payment group
+  balanced without involving `SYSTEM_REVENUE`.
+- **2026-07-18** — Split invoice payments HOLD the wallet portion (`held_balance`, a
+  reservation, not a ledger movement) before creating the gateway charge, so the same
+  balance cannot back two pending payments. On the first successful webhook settle the hold
+  is released and the balance is debited; a replay never re-releases it. A wallet that fully
+  covers the total settles synchronously with no gateway round-trip.
+- **2026-07-18** — Webhook idempotency is enforced at three layers: a Redis lock on the
+  transaction number (serializes concurrent duplicate deliveries), the intent's own status
+  check (PAID => no-op), and the ledger idempotency key `invoice:<id>:escrow` /
+  `intent:<id>:topup` (the race backstop via `uq_transactions_idempotency`). The signature
+  is verified over the RAW body before the payload is parsed — never re-serialized.
+- **2026-07-18** — The webhook runs in its own committing session (not the request-scoped
+  `get_db`) so a settlement is explicit and a gateway retry sees the committed result. The
+  fake gateway now issues transaction numbers with a random per-instance prefix so they stay
+  globally unique against the `uq_payment_intents_paylink_txn` index across app instances.
+- **2026-07-18** — `POST /api/dev/paylink/simulate` (development only) builds the exact
+  webhook body for a transaction number, signs it with the fake gateway's test secret, and
+  calls the REAL webhook handler — it never bypasses webhook processing (SPEC SECTION 5.1).

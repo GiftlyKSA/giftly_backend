@@ -13,7 +13,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.deps import Actor, get_db, get_settings, require_role
+from app.core.deps import Actor, get_db, get_redis, get_settings, require_role
 from app.core.money import money_str, parse_money, parse_rate
 from app.models import Invoice, InvoiceItem
 from app.models.enums import UserRole
@@ -25,13 +25,16 @@ from app.schemas.invoices import (
     InvoiceItemResponse,
     InvoiceResponse,
 )
+from app.schemas.payments import PayInvoiceResponse
 from app.services.invoice_service import InvoiceLineInput, InvoiceService, NewInvoiceInput
+from app.services.payment_service import build_payment_service
 from app.services.promo_service import PromoService
 
 router = APIRouter(prefix="/api", tags=["invoices"])
 
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 _Courier = require_role(UserRole.COURIER)
+_Customer = require_role(UserRole.CUSTOMER)
 _Participant = require_role(UserRole.CUSTOMER, UserRole.COURIER)
 
 
@@ -136,6 +139,30 @@ async def get_invoice(
         invoice_id=invoice_id, actor_id=actor.id
     )
     return _detail(invoice, items)
+
+
+@router.post("/invoices/{invoice_id}/pay", response_model=PayInvoiceResponse)
+async def pay_invoice(
+    request: Request,
+    db: DbDep,
+    invoice_id: uuid.UUID,
+    actor: Annotated[Actor, Depends(_Customer)],
+) -> PayInvoiceResponse:
+    """Pay an issued invoice from wallet, gateway, or a split of both (customer only)."""
+    service = build_payment_service(
+        session=db,
+        gateway=request.app.state.clients.gateway,
+        redis=get_redis(request),
+        settings=get_settings(request),
+    )
+    result = await service.pay_invoice(invoice_id=invoice_id, customer_id=actor.id)
+    return PayInvoiceResponse(
+        invoice_id=str(result.invoice_id),
+        status=result.status,
+        amount_from_wallet=money_str(result.amount_from_wallet),
+        amount_from_gateway=money_str(result.amount_from_gateway),
+        payment_url=result.payment_url,
+    )
 
 
 @router.post("/invoices/{invoice_id}/cancel", response_model=InvoiceResponse)

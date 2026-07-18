@@ -580,6 +580,46 @@
         "title": "OrderSummary",
         "type": "object"
       },
+      "PayInvoiceResponse": {
+        "description": "The result of paying an invoice.\n\n``status`` is ``PAID`` when the wallet covered the total (settled immediately) or\n``PENDING`` when a gateway payment is required \u2014 then ``payment_url`` is set.",
+        "properties": {
+          "amount_from_gateway": {
+            "title": "Amount From Gateway",
+            "type": "string"
+          },
+          "amount_from_wallet": {
+            "title": "Amount From Wallet",
+            "type": "string"
+          },
+          "invoice_id": {
+            "title": "Invoice Id",
+            "type": "string"
+          },
+          "payment_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Payment Url"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invoice_id",
+          "status",
+          "amount_from_wallet",
+          "amount_from_gateway"
+        ],
+        "title": "PayInvoiceResponse",
+        "type": "object"
+      },
       "PromoPreviewResponse": {
         "description": "A previewed promo discount and the total it would produce.",
         "properties": {
@@ -799,6 +839,30 @@
         "title": "SendOtpResponse",
         "type": "object"
       },
+      "SimulatePaymentRequest": {
+        "additionalProperties": false,
+        "description": "Development-only: simulate a gateway callback for a transaction number.",
+        "properties": {
+          "status": {
+            "default": "PAID",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Status",
+            "type": "string"
+          },
+          "transaction_no": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Transaction No",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transaction_no"
+        ],
+        "title": "SimulatePaymentRequest",
+        "type": "object"
+      },
       "TokenResponse": {
         "description": "An issued access + refresh token pair.",
         "properties": {
@@ -824,6 +888,48 @@
           "role"
         ],
         "title": "TokenResponse",
+        "type": "object"
+      },
+      "TopupRequest": {
+        "additionalProperties": false,
+        "description": "Start a wallet top-up for a bounded amount.",
+        "properties": {
+          "amount": {
+            "description": "Top-up amount, e.g. \"500.00\".",
+            "maxLength": 20,
+            "minLength": 1,
+            "title": "Amount",
+            "type": "string"
+          }
+        },
+        "required": [
+          "amount"
+        ],
+        "title": "TopupRequest",
+        "type": "object"
+      },
+      "TopupResponse": {
+        "description": "A started top-up: redirect the client to ``payment_url``.",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "payment_intent_id": {
+            "title": "Payment Intent Id",
+            "type": "string"
+          },
+          "payment_url": {
+            "title": "Payment Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payment_intent_id",
+          "amount",
+          "payment_url"
+        ],
+        "title": "TopupResponse",
         "type": "object"
       },
       "TransactionPage": {
@@ -1247,6 +1353,20 @@
         ],
         "title": "WalletResponse",
         "type": "object"
+      },
+      "WebhookAck": {
+        "description": "The webhook acknowledgement returned to the gateway.",
+        "properties": {
+          "outcome": {
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "WebhookAck",
+        "type": "object"
       }
     }
   },
@@ -1439,6 +1559,48 @@
         ]
       }
     },
+    "/api/dev/paylink/simulate": {
+      "post": {
+        "description": "Fire a correctly-signed webhook at the REAL handler (development only).\n\nLooks up the intent's amount, builds the exact webhook body the gateway would send,\nsigns it with the fake gateway's test secret, and calls the production webhook\nhandler \u2014 it never bypasses webhook processing.",
+        "operationId": "simulate_payment_api_dev_paylink_simulate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulatePaymentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Simulate Payment",
+        "tags": [
+          "dev"
+        ]
+      }
+    },
     "/api/dev/ping": {
       "get": {
         "description": "Confirm dev routes are registered (development only).",
@@ -1600,6 +1762,50 @@
           }
         },
         "summary": "Cancel Invoice",
+        "tags": [
+          "invoices"
+        ]
+      }
+    },
+    "/api/invoices/{invoice_id}/pay": {
+      "post": {
+        "description": "Pay an issued invoice from wallet, gateway, or a split of both (customer only).",
+        "operationId": "pay_invoice_api_invoices__invoice_id__pay_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invoice_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Invoice Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PayInvoiceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Pay Invoice",
         "tags": [
           "invoices"
         ]
@@ -2294,6 +2500,92 @@
         "summary": "List My Transactions",
         "tags": [
           "wallets"
+        ]
+      }
+    },
+    "/api/wallets/topup": {
+      "post": {
+        "description": "Start a wallet top-up and return the gateway payment URL.",
+        "operationId": "start_topup_api_wallets_topup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TopupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TopupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Topup",
+        "tags": [
+          "wallets"
+        ]
+      }
+    },
+    "/api/webhooks/paylink": {
+      "post": {
+        "description": "Verify and process a Paylink payment callback (signature over the raw body).",
+        "operationId": "paylink_webhook_api_webhooks_paylink_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-paylink-signature",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Paylink-Signature",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookAck"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Paylink Webhook",
+        "tags": [
+          "webhooks"
         ]
       }
     }

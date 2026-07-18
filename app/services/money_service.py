@@ -16,6 +16,7 @@ import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from app.core.exceptions import InsufficientFundsError
 from app.core.money import ZERO, quantize_money
 from app.models.enums import TransactionStatus, TransactionType, WalletType
 from app.repositories.wallet_repository import WalletRepository
@@ -167,6 +168,106 @@ class MoneyService:
         if wallet is None:
             return ZERO
         return quantize_money(wallet.balance - wallet.held_balance)
+
+    async def hold_funds(self, *, wallet_id: uuid.UUID, amount: Decimal) -> None:
+        """Reserve ``amount`` of a wallet's available balance (held, not moved).
+
+        A hold is a reservation, not a ledger movement: it bumps ``held_balance`` under a
+        row lock so the same balance cannot back two pending gateway payments. The wallet
+        invariant (balance == SUM(settled)) is untouched.
+
+        Raises:
+            InsufficientFundsError: The available balance cannot cover the hold.
+        """
+        amount = quantize_money(amount)
+        locked = await self._wallets.lock_wallets([wallet_id])
+        wallet = locked[wallet_id]
+        if quantize_money(wallet.balance - wallet.held_balance) < amount:
+            raise InsufficientFundsError()
+        wallet.held_balance = quantize_money(wallet.held_balance + amount)
+        wallet.version += 1
+        await self._wallets.flush()
+
+    async def release_hold(self, *, wallet_id: uuid.UUID, amount: Decimal) -> None:
+        """Release a previously placed hold, returning the amount to available."""
+        amount = quantize_money(amount)
+        locked = await self._wallets.lock_wallets([wallet_id])
+        wallet = locked[wallet_id]
+        wallet.held_balance = quantize_money(max(ZERO, wallet.held_balance - amount))
+        wallet.version += 1
+        await self._wallets.flush()
+
+    async def fund_escrow_for_invoice(
+        self,
+        *,
+        customer_wallet_id: uuid.UUID,
+        wallet_amount: Decimal,
+        gateway_amount: Decimal,
+        invoice_id: uuid.UUID,
+        order_id: uuid.UUID,
+        intent_id: uuid.UUID | None,
+        was_held: bool,
+    ) -> bool:
+        """Move an invoice's paid total into escrow (workflow B.8), idempotently.
+
+        The customer's wallet portion and the gateway portion both land in
+        ``SYSTEM_ESCROW``, where they are held until delivery/approval releases them
+        (Phase 10). Balanced group: ``-wallet -gateway +total == 0``. The escrow leg
+        carries the idempotency key, so a webhook replay is a no-op.
+
+        When ``was_held`` is True the wallet portion was reserved by :meth:`hold_funds`
+        (the split/gateway path); on the first successful post the hold is released, and
+        never on a replay.
+
+        Returns:
+            True if the group was posted, False if it was a detected replay.
+        """
+        wallet_amount = quantize_money(wallet_amount)
+        gateway_amount = quantize_money(gateway_amount)
+        total = quantize_money(wallet_amount + gateway_amount)
+        escrow = await self._wallets.get_system(WalletType.SYSTEM_ESCROW)
+        gateway = await self._wallets.get_system(WalletType.SYSTEM_GATEWAY)
+        correlation = uuid.uuid4()
+
+        legs: list[Leg] = []
+        if wallet_amount > ZERO:
+            legs.append(
+                Leg(
+                    wallet_id=customer_wallet_id,
+                    amount=-wallet_amount,
+                    txn_type=TransactionType.PAYMENT,
+                    reference_invoice_id=invoice_id,
+                    reference_order_id=order_id,
+                    reference_intent_id=intent_id,
+                )
+            )
+        if gateway_amount > ZERO:
+            legs.append(
+                Leg(
+                    wallet_id=gateway.id,
+                    amount=-gateway_amount,
+                    txn_type=TransactionType.PAYMENT,
+                    reference_invoice_id=invoice_id,
+                    reference_order_id=order_id,
+                    reference_intent_id=intent_id,
+                )
+            )
+        legs.append(
+            Leg(
+                wallet_id=escrow.id,
+                amount=total,
+                txn_type=TransactionType.ESCROW_HOLD,
+                idempotency_key=f"invoice:{invoice_id}:escrow",
+                reference_invoice_id=invoice_id,
+                reference_order_id=order_id,
+                reference_intent_id=intent_id,
+            )
+        )
+        posted = await self.post_group(legs=legs, correlation_id=correlation)
+        # Release the reservation only on the first successful post (never on a replay).
+        if posted and was_held and wallet_amount > ZERO:
+            await self.release_hold(wallet_id=customer_wallet_id, amount=wallet_amount)
+        return posted
 
     async def reconcile(self) -> ReconcileReport:
         """Assert the ledger invariants across every wallet and correlation group.

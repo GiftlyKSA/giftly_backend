@@ -64,3 +64,6 @@ Total                      655.50
 
 Without the promo the same invoice totals **724.50** (VAT 94.50). See
 `docs/flows/invoice-and-pricing.md` for the exact algorithm.
+
+## POST /api/invoices/{invoice_id}/pay
+Pay an issued invoice from wallet, gateway, or a split. See `docs/endpoints/payments.md`.

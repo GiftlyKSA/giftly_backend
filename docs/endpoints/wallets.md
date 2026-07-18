@@ -32,3 +32,6 @@ Return the caller's ledger entries, newest first (keyset paged). **Auth**: Beare
 }
 ```
 `amount` is signed (`+` credit, `−` debit). `next_cursor` is null on the last page.
+
+## POST /api/wallets/topup
+Start a wallet top-up (gateway-funded). See `docs/endpoints/payments.md`.

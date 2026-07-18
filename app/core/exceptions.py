@@ -91,6 +91,30 @@ class ValidationDomainError(DomainError):
     status_code = 422
 
 
+class InsufficientFundsError(DomainError):
+    """The wallet's available balance cannot cover the requested debit."""
+
+    code = "INSUFFICIENT_FUNDS"
+    message = "Your available balance is insufficient for this operation."
+    status_code = 409
+
+
+class InvalidWebhookSignatureError(DomainError):
+    """A gateway webhook failed HMAC verification over its raw body."""
+
+    code = "INVALID_SIGNATURE"
+    message = "The webhook signature is invalid."
+    status_code = 401
+
+
+class PaymentAmountMismatchError(DomainError):
+    """A webhook's amount does not match the payment intent it claims to settle."""
+
+    code = "PAYMENT_AMOUNT_MISMATCH"
+    message = "The payment amount does not match the intent."
+    status_code = 400
+
+
 class RateLimitedError(DomainError):
     """The actor exceeded a rate limit; carries a retry-after hint."""
 
