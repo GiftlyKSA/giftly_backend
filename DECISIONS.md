@@ -65,3 +65,17 @@ explicit / consistent option was chosen) and environment-forced deviations, date
 - **2026-07-17** — `email` is validated with a constrained-string pattern rather than
   Pydantic `EmailStr` to avoid adding the `email-validator` dependency for a field used
   only for the invoice-paid receipt.
+- **2026-07-17** — Money/ledger (Phase 4): `MoneyService.post_group` is the single
+  double-entry primitive. It asserts the legs sum to 0.00 at runtime, locks every
+  involved wallet `FOR UPDATE` in ascending id order, applies each leg, and appends one
+  SETTLED row per leg. It flushes before returning: a later group's `SELECT ... FOR
+  UPDATE` repopulates the wallet rows and would otherwise discard an earlier group's
+  still-pending in-memory balance update (found and fixed via the ledger property test).
+- **2026-07-17** — Idempotency in the money service is enforced at two layers: an
+  application check on the leg idempotency key (fast path) and the DB
+  `uq_transactions_idempotency` unique index (the race backstop). Under concurrent
+  double-submit, exactly one group commits and the losers get an IntegrityError the
+  caller treats as an already-processed replay.
+- **2026-07-17** — Reconciliation checks both invariants over SETTLED rows only, so an
+  in-flight PENDING escrow hold (a lone leg not yet settled) never trips the
+  per-correlation zero-sum check; once the hold settles, its group balances to 0.00.

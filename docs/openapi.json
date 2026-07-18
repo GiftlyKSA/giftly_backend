@@ -208,6 +208,81 @@
         "title": "TokenResponse",
         "type": "object"
       },
+      "TransactionPage": {
+        "description": "A keyset page of transactions.",
+        "properties": {
+          "items": {
+            "description": "Newest first.",
+            "items": {
+              "$ref": "#/components/schemas/TransactionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass back to fetch the next page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "TransactionPage",
+        "type": "object"
+      },
+      "TransactionResponse": {
+        "description": "One ledger entry as seen by its wallet owner.",
+        "properties": {
+          "amount": {
+            "description": "Signed amount as a decimal string.",
+            "title": "Amount",
+            "type": "string"
+          },
+          "balance_after": {
+            "description": "Wallet balance after this entry.",
+            "title": "Balance After",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "ISO-8601 UTC timestamp.",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "description": "Transaction id.",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "description": "PENDING | SETTLED | REVERSED.",
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "description": "Transaction type.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "amount",
+          "type",
+          "status",
+          "balance_after",
+          "created_at"
+        ],
+        "title": "TransactionResponse",
+        "type": "object"
+      },
       "UserMeResponse": {
         "description": "The authenticated user's own profile.",
         "properties": {
@@ -450,6 +525,45 @@
           "is_new_user"
         ],
         "title": "VerifyOtpResponse",
+        "type": "object"
+      },
+      "WalletResponse": {
+        "description": "A user's wallet snapshot.",
+        "properties": {
+          "available": {
+            "description": "balance - held_balance.",
+            "title": "Available",
+            "type": "string"
+          },
+          "balance": {
+            "description": "Total balance as a decimal string.",
+            "examples": [
+              "300.00"
+            ],
+            "title": "Balance",
+            "type": "string"
+          },
+          "currency": {
+            "description": "ISO currency code.",
+            "examples": [
+              "SAR"
+            ],
+            "title": "Currency",
+            "type": "string"
+          },
+          "held_balance": {
+            "description": "Funds held (e.g. an escrow hold).",
+            "title": "Held Balance",
+            "type": "string"
+          }
+        },
+        "required": [
+          "balance",
+          "held_balance",
+          "available",
+          "currency"
+        ],
+        "title": "WalletResponse",
         "type": "object"
       }
     }
@@ -780,6 +894,90 @@
         "summary": "Update Me",
         "tags": [
           "users"
+        ]
+      }
+    },
+    "/api/wallets/me": {
+      "get": {
+        "description": "Return the authenticated user's wallet snapshot.",
+        "operationId": "get_my_wallet_api_wallets_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WalletResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get My Wallet",
+        "tags": [
+          "wallets"
+        ]
+      }
+    },
+    "/api/wallets/me/transactions": {
+      "get": {
+        "description": "Return the authenticated user's ledger entries, newest first (keyset paged).",
+        "operationId": "list_my_transactions_api_wallets_me_transactions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TransactionPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List My Transactions",
+        "tags": [
+          "wallets"
         ]
       }
     }
