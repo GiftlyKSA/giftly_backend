@@ -93,3 +93,18 @@ explicit / consistent option was chosen) and environment-forced deviations, date
   invoice, which the invoice service creates. The promo service's `validate(code, base,
   user_id)` is the reusable core and is fully tested now; the router wraps it once the
   invoice base exists.
+- **2026-07-18** — Orders (Phase 6): the accept race uses BOTH a Redis lock
+  (`lock:order_accept:<id>`, SET NX EX + Lua compare-and-delete release) AND a
+  `SELECT ... FOR UPDATE` on the order row. If Redis ever fails open, the DB still
+  serializes the assignment; both layers are deliberate (SPEC SECTION 20.C).
+- **2026-07-18** — Storage is behind a `StorageClient` ABC with a FakeStorageClient so
+  the whole media + order flow runs with no S3: requesting an upload URL registers the
+  key in the fake, mirroring a completed client PUT. Magic-byte verification is real in
+  the S3 client and reported valid in the fake (no real bytes to inspect).
+- **2026-07-18** — A courier gets 404 (not 403) on an order they have no relationship
+  to, and the radar summary carries no coordinates; the exact delivery point appears
+  only after assignment (SPEC SECTION 17.3, A01). Media/upload input errors are 400
+  (`BAD_REQUEST`), distinct from 422 semantic errors.
+- **2026-07-18** — Order broadcast to city couriers is deferred to Phase 13
+  (notifications); the radar (`GET /api/orders/available`) already lets couriers find
+  new orders without push, so the flow is complete without it.

@@ -23,6 +23,9 @@ from app.integrations.push.real import RealPushClient
 from app.integrations.sms.base import SmsClient
 from app.integrations.sms.fake import FakeSmsClient
 from app.integrations.sms.real import RealSmsClient
+from app.integrations.storage.base import StorageClient
+from app.integrations.storage.fake import FakeStorageClient
+from app.integrations.storage.real import S3StorageClient
 
 
 @dataclass(frozen=True)
@@ -33,6 +36,7 @@ class Clients:
     email: EmailClient
     sms: SmsClient
     push: PushClient
+    storage: StorageClient
 
 
 def build_clients(settings: Settings) -> Clients:
@@ -80,7 +84,12 @@ def _build_production_clients(settings: Settings) -> Clients:
             else ""
         ),
     )
-    return Clients(gateway=gateway, email=email, sms=sms, push=push)
+    storage = S3StorageClient(
+        bucket=settings.S3_BUCKET_NAME or "",
+        region=settings.AWS_REGION or "",
+        cloudfront_domain=settings.CLOUDFRONT_DOMAIN or "",
+    )
+    return Clients(gateway=gateway, email=email, sms=sms, push=push, storage=storage)
 
 
 def _build_fake_clients(environment: Environment) -> Clients:
@@ -89,4 +98,5 @@ def _build_fake_clients(environment: Environment) -> Clients:
         email=FakeEmailClient(environment),
         sms=FakeSmsClient(environment),
         push=FakePushClient(environment),
+        storage=FakeStorageClient(environment),
     )

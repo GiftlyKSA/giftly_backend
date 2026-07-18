@@ -75,6 +75,14 @@ class OrderAlreadyAssignedError(ConflictError):
     message = "This order has already been assigned to another courier."
 
 
+class BadRequestError(DomainError):
+    """A malformed or out-of-bounds request value (400)."""
+
+    code = "BAD_REQUEST"
+    message = "The request could not be processed."
+    status_code = 400
+
+
 class ValidationDomainError(DomainError):
     """A semantically invalid request that passed schema validation."""
 
