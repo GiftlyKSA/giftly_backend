@@ -161,6 +161,29 @@ class InvoiceRepository:
             )
         )
 
+    async def list_receipt_pending(self, limit: int) -> list[Invoice]:
+        """Return PAID invoices whose receipt has not been sent, oldest first.
+
+        Backed by the partial index ``idx_invoices_receipt_pending``; the receipt
+        sweeper drains this set.
+        """
+        return list(
+            await self._session.scalars(
+                select(Invoice)
+                .where(
+                    Invoice.status == InvoiceStatus.PAID,
+                    Invoice.receipt_email_sent_at.is_(None),
+                )
+                .order_by(Invoice.paid_at)
+                .limit(limit)
+            )
+        )
+
+    async def mark_receipt_sent(self, invoice: Invoice, *, when: datetime) -> None:
+        """Stamp the receipt-sent time so the invoice leaves the pending set."""
+        invoice.receipt_email_sent_at = when
+        await self._session.flush()
+
     async def flush(self) -> None:
         """Flush pending writes."""
         await self._session.flush()

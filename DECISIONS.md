@@ -155,3 +155,17 @@ explicit / consistent option was chosen) and environment-forced deviations, date
 - **2026-07-18** — `POST /api/dev/paylink/simulate` (development only) builds the exact
   webhook body for a transaction number, signs it with the fake gateway's test secret, and
   calls the REAL webhook handler — it never bypasses webhook processing (SPEC SECTION 5.1).
+- **2026-07-18** — Receipt (Phase 9): the invoice-paid receipt is delivered by a sweeper
+  over the `idx_invoices_receipt_pending` index (PAID + `receipt_email_sent_at IS NULL`),
+  not by an enqueue on the payment path. The index-backed sweep is the mechanism, so a
+  receipt survives a failed send — it stays pending until a later pass delivers it. A
+  scheduled TaskIQ task (`deliver_pending_receipts`, every 5 min, Redis-locked) runs it.
+- **2026-07-18** — Receipt delivery is at-most-once per sweep (the invoice row is locked
+  `FOR UPDATE` and re-checked) and at-least-once overall (send-then-stamp; a crash before
+  the commit retries). For a receipt, a rare duplicate is friendlier than a lost email.
+  A customer with no email on file has their invoice stamped anyway so the sweeper stops
+  retrying it — there is no address to send to.
+- **2026-07-18** — Receipt template variables carry amounts and the order/invoice
+  reference only — never a phone, coordinates, or any Restricted data (SPEC SECTION 5.3).
+  The email client stays behind the `EmailClient` ABC; the sweeper builds the environment's
+  client (Fake outside production) or accepts an injected one for tests.
