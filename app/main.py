@@ -65,6 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from app.routers import (
         admin_api,
         auth,
+        chat,
         invoices,
         media,
         orders,
@@ -85,6 +86,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(webhooks.router)
     app.include_router(ratings.router)
     app.include_router(admin_api.router)
+    app.include_router(chat.router)
 
     if settings.ADMIN_DASHBOARD_ENABLED:
         _register_admin(app)

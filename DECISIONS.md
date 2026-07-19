@@ -192,3 +192,22 @@ explicit / consistent option was chosen) and environment-forced deviations, date
   (`uq_ratings_order_rater`, `chk_no_self_rating`). Auto-approve and the receipt/reconcile
   jobs share the same sweeper shape: injectable factory + own-engine fallback, per-row
   transactions, and a Redis-locked scheduled entry point.
+- **2026-07-19** — Chat (Phase 11): message content and the inbox preview are both
+  AES-256-GCM encrypted at rest, bound by AAD to their row/column
+  (`build_aad("messages","content",<conv_id>)` and
+  `build_aad("conversations","last_message_preview",<conv_id>)`). Plaintext never lands in
+  an unencrypted column (ADR 0004); the inbox decrypts one preview per row. Chat search
+  stays out of scope because it conflicts with encryption.
+- **2026-07-19** — Live delivery uses Redis pub/sub (channel `chat:conversation:<id>`): on
+  send the service publishes the decrypted message, and each WebSocket subscribes to its
+  conversation's channel and forwards to its socket. This makes delivery work across
+  instances without an in-process registry — a message sent on any node reaches every open
+  socket. The WS is authenticated by an access token in the `?token=` query param (same
+  decode + denylist as REST) and only the two members may connect.
+- **2026-07-19** — The WS handler runs two coroutines: a pump forwarding pubsub->socket and
+  a loop reading socket->send_message (so clients can send over the socket too). On close
+  the reader task is cancelled; because `asyncio.CancelledError` is not an `Exception`
+  subclass, cleanup explicitly suppresses it so a normal disconnect never surfaces as an
+  error. Unread counters live on the conversation (customer/courier); a send bumps the
+  recipient's, mark-read zeroes the reader's and flips `is_read` on inbound messages (the
+  only mutation the append-only trigger allows).
