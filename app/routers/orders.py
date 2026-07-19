@@ -15,12 +15,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.deps import Actor, get_db, get_redis, get_settings, require_role
 from app.core.exceptions import ForbiddenError, NotFoundError
 from app.core.money import money_str
-from app.models import Order
+from app.models import Dispute, Order
 from app.models.enums import OrderStatus, UserRole
 from app.repositories.courier_repository import CourierRepository
+from app.repositories.dispute_repository import DisputeRepository
+from app.repositories.invoice_repository import InvoiceRepository
 from app.repositories.message_repository import MessageWriter
 from app.repositories.order_repository import OrderRepository
 from app.repositories.user_repository import UserRepository
+from app.repositories.wallet_repository import WalletRepository
+from app.schemas.fulfillment import (
+    DeliverRequest,
+    DisputeRequest,
+    DisputeResponse,
+)
 from app.schemas.orders import (
     CancelOrderRequest,
     CreateOrderRequest,
@@ -28,7 +36,9 @@ from app.schemas.orders import (
     OrderListResponse,
     OrderSummary,
 )
+from app.services.fulfillment_service import DeliveryInput, FulfillmentService
 from app.services.media_service import MediaService
+from app.services.money_service import MoneyService
 from app.services.order_service import NewOrderInput, OrderService
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
@@ -36,6 +46,7 @@ router = APIRouter(prefix="/api/orders", tags=["orders"])
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 _Customer = require_role(UserRole.CUSTOMER)
 _Courier = require_role(UserRole.COURIER)
+_Participant = require_role(UserRole.CUSTOMER, UserRole.COURIER)
 
 
 def _service(request: Request, db: AsyncSession) -> OrderService:
@@ -48,6 +59,28 @@ def _service(request: Request, db: AsyncSession) -> OrderService:
         messages=MessageWriter(db),
         redis=get_redis(request),
         settings=get_settings(request),
+    )
+
+
+def _fulfillment(request: Request, db: AsyncSession) -> FulfillmentService:
+    return FulfillmentService(
+        orders=OrderRepository(db),
+        invoices=InvoiceRepository(db),
+        disputes=DisputeRepository(db),
+        wallets=WalletRepository(db),
+        money=MoneyService(WalletRepository(db)),
+        media=MediaService(request.app.state.clients.storage, get_settings(request)),
+        settings=get_settings(request),
+    )
+
+
+def _dispute(dispute: Dispute) -> DisputeResponse:
+    return DisputeResponse(
+        id=str(dispute.id),
+        order_id=str(dispute.order_id),
+        status=str(dispute.status),
+        reason=dispute.reason,
+        resolution_note=dispute.resolution_note,
     )
 
 
@@ -155,6 +188,55 @@ async def cancel_order(
         order_id=order_id, actor_id=actor.id, reason=body.reason
     )
     return await _detail(db, order, actor)
+
+
+@router.post("/{order_id}/deliver", response_model=OrderDetail)
+async def deliver_order(
+    request: Request,
+    db: DbDep,
+    order_id: uuid.UUID,
+    body: DeliverRequest,
+    actor: Annotated[Actor, Depends(_Courier)],
+) -> OrderDetail:
+    """Mark an in-progress order delivered with geofenced proof (assigned courier)."""
+    order = await _fulfillment(request, db).submit_delivery(
+        order_id=order_id,
+        courier_id=actor.id,
+        data=DeliveryInput(
+            latitude=body.latitude,
+            longitude=body.longitude,
+            proof_media_keys=body.proof_media_keys,
+            note=body.note,
+        ),
+    )
+    return await _detail(db, order, actor)
+
+
+@router.post("/{order_id}/approve", response_model=OrderDetail)
+async def approve_order(
+    request: Request,
+    db: DbDep,
+    order_id: uuid.UUID,
+    actor: Annotated[Actor, Depends(_Customer)],
+) -> OrderDetail:
+    """Approve a delivered order: complete it and release escrow (customer)."""
+    order = await _fulfillment(request, db).approve_order(order_id=order_id, customer_id=actor.id)
+    return await _detail(db, order, actor)
+
+
+@router.post("/{order_id}/dispute", response_model=DisputeResponse, status_code=201)
+async def dispute_order(
+    request: Request,
+    db: DbDep,
+    order_id: uuid.UUID,
+    body: DisputeRequest,
+    actor: Annotated[Actor, Depends(_Participant)],
+) -> DisputeResponse:
+    """Open a dispute on an order, freezing escrow (either participant)."""
+    dispute = await _fulfillment(request, db).raise_dispute(
+        order_id=order_id, actor_id=actor.id, reason=body.reason
+    )
+    return _dispute(dispute)
 
 
 def _page(rows: list[Order], limit: int) -> OrderListResponse:

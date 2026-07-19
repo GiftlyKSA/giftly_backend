@@ -111,6 +111,57 @@ class PricingResult:
     breakdown: dict[str, object] = field(default_factory=dict)
 
 
+@dataclass(frozen=True)
+class Settlement:
+    """How a paid invoice's escrow total splits on completion (SPEC SECTION 20.G, ADR 0005).
+
+    Attributes:
+        commission_amount: The platform commission on the pre-discount base.
+        courier_payout_amount: What the courier receives — the PRE-discount base
+            (``items_net + courier_fee``) minus commission, so a promo never underpays
+            the courier.
+        tax_amount: The VAT collected on the invoice, owed to SYSTEM_TAX_PAYABLE.
+        platform_revenue_amount: ``total - tax - courier_payout``; equivalently
+            ``service_fee + commission - promo_subsidy``. Signed — it can go negative when
+            subsidies exceed fees, which is why SYSTEM_REVENUE is exempt from the
+            non-negative balance CHECK.
+    """
+
+    commission_amount: Decimal
+    courier_payout_amount: Decimal
+    tax_amount: Decimal
+    platform_revenue_amount: Decimal
+
+
+def compute_settlement(
+    *,
+    items_net_amount: Decimal,
+    courier_fee_amount: Decimal,
+    tax_amount: Decimal,
+    total_amount: Decimal,
+    commission_rate: Decimal,
+) -> Settlement:
+    """Split a paid invoice's total into courier payout, tax, and platform revenue.
+
+    The courier is paid on the PRE-discount base (ADR 0005): the platform funds any promo,
+    so marketing never silently reduces the courier's pay. ``platform_revenue_amount`` is
+    the residual (``total - tax - courier_payout``), so the legs always reconstruct the
+    total; it absorbs the promo subsidy and can be negative.
+    """
+    base = quantize_money(items_net_amount + courier_fee_amount)
+    commission = quantize_money(base * commission_rate)
+    courier_payout = quantize_money(base - commission)
+    tax = quantize_money(tax_amount)
+    total = quantize_money(total_amount)
+    revenue = quantize_money(total - tax - courier_payout)
+    return Settlement(
+        commission_amount=commission,
+        courier_payout_amount=courier_payout,
+        tax_amount=tax,
+        platform_revenue_amount=revenue,
+    )
+
+
 def _compute_service_fee(base: Decimal, cfg: PricingConfig) -> Decimal:
     """Compute the clamped platform service fee on the items+courier base.
 

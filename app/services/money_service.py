@@ -162,6 +162,154 @@ class MoneyService:
             ],
         )
 
+    async def release_escrow_on_completion(
+        self,
+        *,
+        order_id: uuid.UUID,
+        invoice_id: uuid.UUID,
+        courier_wallet_id: uuid.UUID,
+        courier_payout_amount: Decimal,
+        tax_amount: Decimal,
+        platform_revenue_amount: Decimal,
+    ) -> bool:
+        """Release escrow on order completion (workflow G), idempotently.
+
+        Escrow pays out the courier, the tax authority, and platform revenue in one
+        balanced group (``-total + payout + tax + revenue == 0``). Keyed on the order so a
+        customer approval racing the auto-approve job releases exactly once.
+        """
+        courier_payout = quantize_money(courier_payout_amount)
+        tax = quantize_money(tax_amount)
+        revenue = quantize_money(platform_revenue_amount)
+        total = quantize_money(courier_payout + tax + revenue)
+        escrow = await self._wallets.get_system(WalletType.SYSTEM_ESCROW)
+        tax_wallet = await self._wallets.get_system(WalletType.SYSTEM_TAX_PAYABLE)
+        revenue_wallet = await self._wallets.get_system(WalletType.SYSTEM_REVENUE)
+        correlation = uuid.uuid4()
+
+        legs = [
+            Leg(
+                wallet_id=escrow.id,
+                amount=-total,
+                txn_type=TransactionType.ESCROW_RELEASE,
+                idempotency_key=f"order:{order_id}:release",
+                reference_order_id=order_id,
+                reference_invoice_id=invoice_id,
+            ),
+            Leg(
+                wallet_id=courier_wallet_id,
+                amount=courier_payout,
+                txn_type=TransactionType.ESCROW_RELEASE,
+                reference_order_id=order_id,
+                reference_invoice_id=invoice_id,
+            ),
+        ]
+        if tax != ZERO:
+            legs.append(
+                Leg(
+                    wallet_id=tax_wallet.id,
+                    amount=tax,
+                    txn_type=TransactionType.TAX,
+                    reference_order_id=order_id,
+                    reference_invoice_id=invoice_id,
+                )
+            )
+        if revenue != ZERO:
+            legs.append(
+                Leg(
+                    wallet_id=revenue_wallet.id,
+                    amount=revenue,
+                    txn_type=TransactionType.COMMISSION,
+                    reference_order_id=order_id,
+                    reference_invoice_id=invoice_id,
+                )
+            )
+        return await self.post_group(legs=legs, correlation_id=correlation)
+
+    async def refund_escrow(
+        self,
+        *,
+        order_id: uuid.UUID,
+        invoice_id: uuid.UUID,
+        customer_wallet_id: uuid.UUID,
+        amount: Decimal,
+    ) -> bool:
+        """Refund the full escrow total to the customer's wallet (dispute for customer)."""
+        amount = quantize_money(amount)
+        escrow = await self._wallets.get_system(WalletType.SYSTEM_ESCROW)
+        return await self.post_group(
+            correlation_id=uuid.uuid4(),
+            legs=[
+                Leg(
+                    wallet_id=escrow.id,
+                    amount=-amount,
+                    txn_type=TransactionType.REFUND,
+                    idempotency_key=f"order:{order_id}:refund",
+                    reference_order_id=order_id,
+                    reference_invoice_id=invoice_id,
+                ),
+                Leg(
+                    wallet_id=customer_wallet_id,
+                    amount=amount,
+                    txn_type=TransactionType.REFUND,
+                    reference_order_id=order_id,
+                    reference_invoice_id=invoice_id,
+                ),
+            ],
+        )
+
+    async def split_escrow(
+        self,
+        *,
+        order_id: uuid.UUID,
+        invoice_id: uuid.UUID,
+        courier_wallet_id: uuid.UUID,
+        customer_wallet_id: uuid.UUID,
+        courier_amount: Decimal,
+        refund_amount: Decimal,
+    ) -> bool:
+        """Split escrow between courier and customer (dispute resolved split).
+
+        The platform books no revenue or tax on a split — the two parties divide the held
+        total (``courier_amount + refund_amount == escrow total``). Either side may be
+        zero, in which case its leg is omitted.
+        """
+        courier_amount = quantize_money(courier_amount)
+        refund_amount = quantize_money(refund_amount)
+        total = quantize_money(courier_amount + refund_amount)
+        escrow = await self._wallets.get_system(WalletType.SYSTEM_ESCROW)
+        legs = [
+            Leg(
+                wallet_id=escrow.id,
+                amount=-total,
+                txn_type=TransactionType.ESCROW_RELEASE,
+                idempotency_key=f"order:{order_id}:split",
+                reference_order_id=order_id,
+                reference_invoice_id=invoice_id,
+            )
+        ]
+        if courier_amount != ZERO:
+            legs.append(
+                Leg(
+                    wallet_id=courier_wallet_id,
+                    amount=courier_amount,
+                    txn_type=TransactionType.ESCROW_RELEASE,
+                    reference_order_id=order_id,
+                    reference_invoice_id=invoice_id,
+                )
+            )
+        if refund_amount != ZERO:
+            legs.append(
+                Leg(
+                    wallet_id=customer_wallet_id,
+                    amount=refund_amount,
+                    txn_type=TransactionType.REFUND,
+                    reference_order_id=order_id,
+                    reference_invoice_id=invoice_id,
+                )
+            )
+        return await self.post_group(legs=legs, correlation_id=uuid.uuid4())
+
     async def available_balance(self, user_id: uuid.UUID) -> Decimal:
         """Return a user's available balance (balance - held), or 0 if no wallet."""
         wallet = await self._wallets.get_by_user(user_id)

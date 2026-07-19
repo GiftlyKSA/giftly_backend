@@ -169,3 +169,26 @@ explicit / consistent option was chosen) and environment-forced deviations, date
   reference only — never a phone, coordinates, or any Restricted data (SPEC SECTION 5.3).
   The email client stays behind the `EmailClient` ABC; the sweeper builds the environment's
   client (Fake outside production) or accepts an injected one for tests.
+- **2026-07-19** — Fulfilment (Phase 10): the escrow release on completion is one balanced
+  group `-total + courier_payout + tax + revenue == 0`, matching the golden approval-payout
+  (courier 540.00, tax 85.50, revenue 30.00 for the 655.50 invoice). Keyed on
+  `order:<id>:release`, so a customer approval racing the 72h auto-approve job pays out
+  exactly once. `core.pricing.compute_settlement` is the single place the split is computed;
+  the courier is paid on the PRE-discount base minus commission (ADR 0005), and
+  SYSTEM_REVENUE (which may go negative) funds the promo.
+- **2026-07-19** — Delivery is geofenced: the courier's submitted position must be within
+  `MAX_DELIVERY_RADIUS_METERS` of the drop-off, computed with `ST_Distance` on `geography`
+  (metres) — on `geometry` it returns degrees and every check would silently pass. The
+  capture location is stored on each DELIVERY_PROOF photo (the `chk_proof_has_location`
+  CHECK requires it), built longitude-FIRST.
+- **2026-07-19** — Dispute resolution is a JWT ADMIN-role JSON action
+  (`POST /api/admin/disputes/{id}/resolve`), NOT part of the cookie-authenticated HTML admin
+  dashboard, which stays read-only for money (per its own note). RESOLVED_CUSTOMER refunds
+  the full total (→ REFUNDED); RESOLVED_COURIER runs the normal payout (→ COMPLETED);
+  RESOLVED_SPLIT divides the escrow between the parties by an admin-supplied courier amount
+  and the platform books nothing (→ COMPLETED).
+- **2026-07-19** — Ratings derive the rated user from the order (the other participant),
+  never from the request body, and are allowed only on a COMPLETED order, one per rater
+  (`uq_ratings_order_rater`, `chk_no_self_rating`). Auto-approve and the receipt/reconcile
+  jobs share the same sweeper shape: injectable factory + own-engine fallback, per-row
+  transactions, and a Redis-locked scheduled entry point.

@@ -8,9 +8,10 @@ in the query (customer or courier), never fetch-then-compare.
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
-from sqlalchemy import Select, func, select, tuple_
+from geoalchemy2 import Geography
+from sqlalchemy import Select, cast, func, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import Conversation, Order, OrderMedia
@@ -74,8 +75,18 @@ class OrderRepository:
         storage_key: str,
         content_type: str,
         byte_size: int,
+        capture_longitude: float | None = None,
+        capture_latitude: float | None = None,
+        captured_at: datetime | None = None,
     ) -> None:
-        """Attach a media object (customer request or delivery proof) to an order."""
+        """Attach a media object (customer request or delivery proof) to an order.
+
+        A DELIVERY_PROOF must carry the courier's capture location (the DB CHECK
+        ``chk_proof_has_location``); the point is built longitude-FIRST.
+        """
+        location = None
+        if capture_longitude is not None and capture_latitude is not None:
+            location = func.ST_SetSRID(func.ST_MakePoint(capture_longitude, capture_latitude), 4326)
         self._session.add(
             OrderMedia(
                 order_id=order_id,
@@ -84,6 +95,8 @@ class OrderRepository:
                 storage_key=storage_key,
                 content_type=content_type,
                 byte_size=byte_size,
+                capture_location=location,
+                captured_at=captured_at,
             )
         )
         await self._session.flush()
@@ -186,9 +199,35 @@ class OrderRepository:
         """Flush pending writes."""
         await self._session.flush()
 
+    async def distance_to_delivery(
+        self, order_id: uuid.UUID, *, longitude: float, latitude: float
+    ) -> float | None:
+        """Return metres between (lng, lat) and the order's drop-off, or None.
+
+        Both points are cast to ``geography`` so ``ST_Distance`` returns metres — on plain
+        ``geometry`` it returns degrees, which would make every geofence check meaningless.
+        The point is built longitude-FIRST.
+        """
+        point = func.ST_SetSRID(func.ST_MakePoint(longitude, latitude), 4326)
+        result = await self._session.scalar(
+            select(
+                func.ST_Distance(cast(Order.delivery_location, Geography), cast(point, Geography))
+            ).where(Order.id == order_id)
+        )
+        return float(result) if result is not None else None
+
+    async def list_auto_approve_due(self, cutoff: datetime, limit: int) -> list[Order]:
+        """Return DELIVERED orders whose delivered_at is at or before ``cutoff``."""
+        return list(
+            await self._session.scalars(
+                select(Order)
+                .where(Order.status == OrderStatus.DELIVERED, Order.delivered_at <= cutoff)
+                .order_by(Order.delivered_at)
+                .limit(limit)
+            )
+        )
+
     @staticmethod
     def now() -> datetime:
         """Return the current UTC time (single source for assigned/cancelled stamps)."""
-        from datetime import UTC
-
         return datetime.now(UTC)

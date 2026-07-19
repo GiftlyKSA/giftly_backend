@@ -159,6 +159,112 @@
         "title": "CreateOrderRequest",
         "type": "object"
       },
+      "DeliverRequest": {
+        "additionalProperties": false,
+        "description": "A courier's geofenced delivery submission.",
+        "properties": {
+          "latitude": {
+            "description": "Courier's current latitude.",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "description": "Courier's current longitude.",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude",
+            "type": "number"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "proof_media_keys": {
+            "description": "Confirmed delivery-proof photo keys.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 5,
+            "minItems": 1,
+            "title": "Proof Media Keys",
+            "type": "array"
+          }
+        },
+        "required": [
+          "latitude",
+          "longitude",
+          "proof_media_keys"
+        ],
+        "title": "DeliverRequest",
+        "type": "object"
+      },
+      "DisputeRequest": {
+        "additionalProperties": false,
+        "description": "Open a dispute on an order.",
+        "properties": {
+          "reason": {
+            "maxLength": 1000,
+            "minLength": 3,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "DisputeRequest",
+        "type": "object"
+      },
+      "DisputeResponse": {
+        "description": "A dispute's state.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "resolution_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution Note"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "order_id",
+          "status",
+          "reason"
+        ],
+        "title": "DisputeResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -672,6 +778,99 @@
         "title": "PromoValidateRequest",
         "type": "object"
       },
+      "RatingRequest": {
+        "additionalProperties": false,
+        "description": "Rate the other party on a completed order.",
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "score": {
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Score",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "score"
+        ],
+        "title": "RatingRequest",
+        "type": "object"
+      },
+      "RatingResponse": {
+        "description": "A created rating.",
+        "properties": {
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "order_id": {
+            "title": "Order Id",
+            "type": "string"
+          },
+          "rated_user_id": {
+            "title": "Rated User Id",
+            "type": "string"
+          },
+          "score": {
+            "title": "Score",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "order_id",
+          "rated_user_id",
+          "score"
+        ],
+        "title": "RatingResponse",
+        "type": "object"
+      },
+      "RatingSummaryResponse": {
+        "description": "A user's aggregate received rating.",
+        "properties": {
+          "average_score": {
+            "title": "Average Score",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "average_score",
+          "count"
+        ],
+        "title": "RatingSummaryResponse",
+        "type": "object"
+      },
       "RefreshRequest": {
         "additionalProperties": false,
         "description": "Exchange a refresh token for a new token pair.",
@@ -787,6 +986,47 @@
           "role"
         ],
         "title": "RegisterRequest",
+        "type": "object"
+      },
+      "ResolveDisputeRequest": {
+        "additionalProperties": false,
+        "description": "Admin resolution of a dispute.",
+        "properties": {
+          "courier_amount": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Courier's share for a SPLIT resolution (decimal string).",
+            "title": "Courier Amount"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "outcome": {
+            "description": "RESOLVED_CUSTOMER | RESOLVED_COURIER | RESOLVED_SPLIT.",
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome"
+        ],
+        "title": "ResolveDisputeRequest",
         "type": "object"
       },
       "SendOtpRequest": {
@@ -1376,6 +1616,60 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/admin/disputes/{dispute_id}/resolve": {
+      "post": {
+        "description": "Resolve a dispute, moving escrow accordingly (ADMIN only).",
+        "operationId": "resolve_dispute_api_admin_disputes__dispute_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "dispute_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Dispute Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveDisputeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisputeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resolve Dispute",
+        "tags": [
+          "admin-api"
+        ]
+      }
+    },
     "/api/auth/logout": {
       "post": {
         "description": "Denylist the caller's access token until it would have expired.",
@@ -2163,6 +2457,50 @@
         ]
       }
     },
+    "/api/orders/{order_id}/approve": {
+      "post": {
+        "description": "Approve a delivered order: complete it and release escrow (customer).",
+        "operationId": "approve_order_api_orders__order_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Order",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
     "/api/orders/{order_id}/cancel": {
       "post": {
         "description": "Cancel an order before it is in progress.",
@@ -2212,6 +2550,114 @@
           }
         },
         "summary": "Cancel Order",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/api/orders/{order_id}/deliver": {
+      "post": {
+        "description": "Mark an in-progress order delivered with geofenced proof (assigned courier).",
+        "operationId": "deliver_order_api_orders__order_id__deliver_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeliverRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deliver Order",
+        "tags": [
+          "orders"
+        ]
+      }
+    },
+    "/api/orders/{order_id}/dispute": {
+      "post": {
+        "description": "Open a dispute on an order, freezing escrow (either participant).",
+        "operationId": "dispute_order_api_orders__order_id__dispute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DisputeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DisputeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Dispute Order",
         "tags": [
           "orders"
         ]
@@ -2312,6 +2758,60 @@
         "summary": "Create Invoice",
         "tags": [
           "invoices"
+        ]
+      }
+    },
+    "/api/orders/{order_id}/ratings": {
+      "post": {
+        "description": "Rate the other party on a completed order.",
+        "operationId": "rate_order_api_orders__order_id__ratings_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "order_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Order Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RatingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Rate Order",
+        "tags": [
+          "ratings"
         ]
       }
     },
@@ -2416,6 +2916,50 @@
         "summary": "Update Me",
         "tags": [
           "users"
+        ]
+      }
+    },
+    "/api/users/{user_id}/ratings/summary": {
+      "get": {
+        "description": "Return a user's average received score and rating count.",
+        "operationId": "user_rating_summary_api_users__user_id__ratings_summary_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RatingSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "User Rating Summary",
+        "tags": [
+          "ratings"
         ]
       }
     },
