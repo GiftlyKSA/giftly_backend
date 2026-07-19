@@ -16,8 +16,10 @@ from fastapi.responses import RedirectResponse
 
 from app.core.config import Settings, get_settings
 from app.core.db import build_engine, build_session_factory
+from app.core.jwt import JwtError, decode_access_token
 from app.core.logging import configure_logging
-from app.core.middleware import RequestIdMiddleware, register_exception_handlers
+from app.core.middleware import RequestIdMiddleware, error_response, register_exception_handlers
+from app.core.ratelimit import RateLimiter
 from app.core.redis import build_redis
 from app.integrations.factory import build_clients
 from app.routers import health
@@ -99,8 +101,112 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
+def _client_identity(request: Request, settings: Settings) -> str:
+    """Derive a throttle key: the authenticated user id, else the client IP.
+
+    A best-effort token decode (no denylist check — that is auth's job) lets an
+    authenticated caller be limited by identity rather than a shared NAT address.
+    """
+    header = request.headers.get("Authorization", "")
+    if header.startswith("Bearer "):
+        token = header[len("Bearer ") :].strip()
+        try:
+            claims = decode_access_token(settings, token)
+        except JwtError:
+            pass
+        else:
+            return f"user:{claims.sub}"
+    host = request.client.host if request.client else "unknown"
+    return f"ip:{host}"
+
+
 def _install_middleware(app: FastAPI, settings: Settings) -> None:
-    """Install security headers, request-id correlation, and CORS."""
+    """Install the security headers, CORS, request id, rate limiter, and body-size guard.
+
+    Middleware added later wraps earlier ones, so these calls run in reverse at request
+    time. The intended request-time order is: security-header stamp (outermost, so every
+    response — even a 429 or 413 — is stamped and de-fingerprinted), CORS, request-id
+    (bound before any envelope is built), then the rate limiter and body-size guard,
+    which short-circuit before a route or the database is ever touched.
+    """
+    _install_rate_limit(app, settings)
+    _install_body_size_guard(app, settings)
+    app.add_middleware(RequestIdMiddleware)
+    _install_cors(app, settings)
+    _install_security_headers(app)
+
+
+def _install_rate_limit(app: FastAPI, settings: Settings) -> None:
+    """Throttle each identity to a fixed window, short-circuiting with a 429."""
+
+    @app.middleware("http")
+    async def _rate_limit(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        # Health probes and CORS preflight are never throttled.
+        if (
+            not settings.RATE_LIMIT_ENABLED
+            or request.method == "OPTIONS"
+            or request.url.path.startswith("/api/health")
+        ):
+            return await call_next(request)
+        limiter = RateLimiter(
+            request.app.state.redis,
+            max_requests=settings.RATE_LIMIT_MAX_REQUESTS,
+            window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
+        )
+        decision = await limiter.check(_client_identity(request, settings))
+        if not decision.allowed:
+            return error_response(
+                429,
+                "RATE_LIMITED",
+                "Too many requests. Please try again later.",
+                headers={"Retry-After": str(decision.retry_after_seconds)},
+            )
+        return await call_next(request)
+
+
+def _install_body_size_guard(app: FastAPI, settings: Settings) -> None:
+    """Reject a request whose declared body exceeds the configured maximum with a 413."""
+
+    @app.middleware("http")
+    async def _body_size_guard(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                length = int(content_length)
+            except ValueError:
+                length = 0
+            if length > settings.MAX_REQUEST_BODY_BYTES:
+                return error_response(413, "PAYLOAD_TOO_LARGE", "The request body is too large.")
+        return await call_next(request)
+
+
+def _install_cors(app: FastAPI, settings: Settings) -> None:
+    """Add CORS: wildcard without credentials in development, the allow-list in production."""
+    if settings.ENVIRONMENT.value == "development":
+        origins = ["*"]
+        allow_credentials = False  # never wildcard origins with credentials.
+    else:
+        origins = settings.cors_origins
+        allow_credentials = True
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+
+def _install_security_headers(app: FastAPI) -> None:
+    """Stamp security headers and strip fingerprinting headers on every response.
+
+    Added last so it is the outermost layer: even a rate-limit 429 or an oversized-body
+    413 rejected upstream gets the security headers and the fingerprint stripping.
+    """
 
     @app.middleware("http")
     async def _security_headers(
@@ -117,22 +223,6 @@ def _install_middleware(app: FastAPI, settings: Settings) -> None:
             if header in response.headers:
                 del response.headers[header]
         return response
-
-    app.add_middleware(RequestIdMiddleware)
-
-    if settings.ENVIRONMENT.value == "development":
-        origins = ["*"]
-        allow_credentials = False  # never wildcard origins with credentials.
-    else:
-        origins = settings.cors_origins
-        allow_credentials = True
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=origins,
-        allow_credentials=allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
 
 def _register_admin(app: FastAPI) -> None:

@@ -99,6 +99,12 @@ class Settings(BaseSettings):
     # CORS
     CORS_ALLOWED_ORIGINS: str = ""
 
+    # Hardening (SPEC SECTION 17.2 A04): global request throttle and body-size guard.
+    RATE_LIMIT_ENABLED: bool = True
+    RATE_LIMIT_MAX_REQUESTS: int = 120
+    RATE_LIMIT_WINDOW_SECONDS: int = 60
+    MAX_REQUEST_BODY_BYTES: int = 1_048_576
+
     # Business rules
     DEFAULT_VAT_RATE: Decimal = Decimal("0.15")
     SERVICE_FEE_RATE: Decimal = Decimal("0.05")

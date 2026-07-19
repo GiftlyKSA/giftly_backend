@@ -51,6 +51,19 @@ def _envelope(code: str, message: str) -> dict[str, object]:
     return {"error": {"code": code, "message": message, "request_id": current_request_id()}}
 
 
+def error_response(
+    status_code: int, code: str, message: str, *, headers: dict[str, str] | None = None
+) -> JSONResponse:
+    """Render an §8.16 error envelope as a JSON response.
+
+    Shared by the exception handlers and the guard middlewares (rate limit, body size)
+    so every error the client sees carries the same shape and the current request id.
+    """
+    return JSONResponse(
+        status_code=status_code, content=_envelope(code, message), headers=headers or {}
+    )
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     """Install the single global exception handler and a domain-error handler."""
 
@@ -59,17 +72,10 @@ def register_exception_handlers(app: FastAPI) -> None:
         headers = {}
         if isinstance(exc, RateLimitedError):
             headers["Retry-After"] = str(exc.retry_after_seconds)
-        return JSONResponse(
-            status_code=exc.status_code,
-            content=_envelope(exc.code, exc.message),
-            headers=headers,
-        )
+        return error_response(exc.status_code, exc.code, exc.message, headers=headers)
 
     @app.exception_handler(Exception)
     async def _handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
         # SECURITY: never leak the exception text, SQL, or a stack trace to a client.
         _logger.exception("Unhandled error", extra={"request_id": current_request_id()})
-        return JSONResponse(
-            status_code=500,
-            content=_envelope("INTERNAL_ERROR", "An unexpected error occurred."),
-        )
+        return error_response(500, "INTERNAL_ERROR", "An unexpected error occurred.")

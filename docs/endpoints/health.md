@@ -10,12 +10,19 @@ the container over a transient Redis blip).
 ```
 
 ## GET /api/health/ready
-Readiness probe. **Auth**: none. Reports whether backing services (DB, Redis, S3) are
-reachable; may fail transiently without implying the process is unhealthy.
+Readiness probe. **Auth**: none. Actively checks the backing services — a `SELECT 1`
+on the database and a `PING` on Redis — and reports each. Never throttled. The probe
+never raises, so a dependency outage is a clean **503**, not a 500. A transient 503 does
+not imply the process itself is unhealthy (that is what `/api/health` is for).
 
-### Success 200
+### Success 200 — all dependencies up
 ```json
-{ "status": "ready" }
+{ "status": "ready", "checks": { "database": "ok", "redis": "ok" } }
+```
+
+### 503 — a dependency is down
+```json
+{ "status": "unavailable", "checks": { "database": "ok", "redis": "down" } }
 ```
 
 ---

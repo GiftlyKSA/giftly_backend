@@ -2470,19 +2470,13 @@
     },
     "/api/health/ready": {
       "get": {
-        "description": "Return readiness. Dependency checks are wired in as services are added.\n\nNote:\n    Kept dependency-free until the DB/Redis/S3 sessions land so the skeleton is\n    runnable; the readiness checks are a Phase 2+ concern.",
+        "description": "Probe the backing services and report readiness.\n\nReturns:\n    200 with each dependency marked ``ok`` when all pass; 503 with the failing\n    dependency marked ``down`` otherwise. The probe never raises, so a dependency\n    outage is a clean 503 rather than a 500.",
         "operationId": "ready_api_health_ready_get",
         "responses": {
           "200": {
             "content": {
               "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Ready Api Health Ready Get",
-                  "type": "object"
-                }
+                "schema": {}
               }
             },
             "description": "Successful Response"

@@ -29,6 +29,10 @@ def make_test_settings(**overrides: object) -> Settings:
         "IDENTITY_FINGERPRINT_PEPPER": "test-pepper-value-not-real-0000000000000",
         "ADMIN_SESSION_SECRET": "test-admin-session-secret-not-real-00000",
         "CORS_ALLOWED_ORIGINS": "http://localhost:3000",
+        # The suite shares one Redis, so every unauthenticated request lands in the same
+        # ip:unknown throttle bucket; leave the limiter off by default and let the
+        # hardening tests opt in explicitly.
+        "RATE_LIMIT_ENABLED": False,
     }
     env.update(overrides)
     return Settings(_env_file=None, **env)  # type: ignore[arg-type]

@@ -230,3 +230,16 @@ explicit / consistent option was chosen) and environment-forced deviations, date
   versions must remain in `FIELD_ENCRYPTION_KEYS` while any message references them. A blob's
   version is read from its first byte (`crypto.blob_version`) so already-active values are
   skipped and rotation is idempotent.
+- **2026-07-19** — Hardening (Phase 14): a global fixed-window rate limiter (default
+  120 req / 60 s) throttles every request, keyed by the authenticated user id when the
+  request is signed and the client IP otherwise. It is deliberately FAIL-OPEN — a Redis
+  outage lets requests through (logged) rather than turning a cache blip into a full
+  outage — and the health probes are exempt so an orchestrator can always reach them.
+  A body-size guard rejects an oversized `Content-Length` up front with 413 before any
+  route or DB call; media never transits the API (pre-signed S3), so the cap only bounds
+  JSON. The security-header middleware is now the OUTERMOST layer so even a 429 or 413
+  rejected upstream is still stamped and de-fingerprinted. The readiness probe went from
+  a static stub to real `SELECT 1` + Redis `PING` checks, returning 503 (never 500) when
+  a dependency is down. Tests keep the limiter off by default (the suite shares one Redis,
+  so unauthenticated requests would collide in one `ip:unknown` bucket) and opt in per
+  test.

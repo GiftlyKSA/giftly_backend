@@ -115,6 +115,14 @@ class PaymentAmountMismatchError(DomainError):
     status_code = 400
 
 
+class PayloadTooLargeError(DomainError):
+    """The request body exceeds the configured maximum size."""
+
+    code = "PAYLOAD_TOO_LARGE"
+    message = "The request body is too large."
+    status_code = 413
+
+
 class RateLimitedError(DomainError):
     """The actor exceeded a rate limit; carries a retry-after hint."""
 

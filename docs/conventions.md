@@ -65,9 +65,22 @@ Every error looks like this:
 | 403 | authenticated but not permitted |
 | 404 | not found, or the caller has no relationship to the resource |
 | 409 | state or lock conflict |
+| 413 | request body too large |
 | 422 | semantically invalid (promo/pricing) |
 | 429 | rate limited (see `Retry-After`) |
 | 500 | opaque server error |
+
+## Rate limiting & body size
+
+Every request is throttled by a global fixed-window limiter (default **120 requests /
+60 s**). The window is keyed per identity: the authenticated user for a signed request,
+otherwise the client IP. Exceeding it returns **429 `RATE_LIMITED`** with a `Retry-After`
+header (seconds until the window resets) — surface a countdown and retry after it. The
+liveness/readiness probes (`/api/health*`) are never throttled.
+
+Request bodies are capped (default **1 MiB**); an oversized body is rejected up front
+with **413 `PAYLOAD_TOO_LARGE`** before any route runs. Media bytes never transit the API
+— clients `PUT` straight to S3 with a pre-signed URL — so this cap only bounds JSON.
 
 ## Error code catalogue
 
@@ -89,6 +102,7 @@ Every error looks like this:
 | `PROMO_USER_LIMIT_REACHED` | 422 | this user's per-user cap reached | inline error |
 | `TOPUP_AMOUNT_OUT_OF_RANGE` | 400 | top-up not in [100, 20000] | inline error |
 | `OUTSIDE_DELIVERY_GEOFENCE` | 403 | courier too far from the drop-off | show distance guidance (never the target coords) |
+| `PAYLOAD_TOO_LARGE` | 413 | request body over the size cap | shrink the payload |
 | `RATE_LIMITED` | 429 | too many attempts | show `Retry-After` countdown |
 
 New codes are added to this table as their endpoints land — it is the single source of
