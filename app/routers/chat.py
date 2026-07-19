@@ -23,6 +23,7 @@ from app.core.deps import Actor, get_db, get_redis, get_settings, require_role
 from app.core.jwt import JwtError, decode_access_token
 from app.models.enums import UserRole
 from app.repositories.chat_repository import ChatRepository
+from app.repositories.device_token_repository import DeviceTokenRepository
 from app.schemas.chat import (
     InboxItemResponse,
     InboxResponse,
@@ -31,6 +32,7 @@ from app.schemas.chat import (
     SendMessageRequest,
 )
 from app.services.chat_service import ChatMessage, ChatService, conversation_channel
+from app.services.notification_service import NotificationService
 
 router = APIRouter(prefix="/api", tags=["chat"])
 
@@ -123,6 +125,21 @@ async def send_message(
     dto = await _service(request, db).send_message(
         conversation_id=conversation_id, sender_id=actor.id, text=body.text
     )
+    # Best-effort push to the recipient — the body carries NO message text (Restricted).
+    conversation = await ChatRepository(db).get_for_actor(conversation_id, actor.id)
+    if conversation is not None:
+        recipient = (
+            conversation.courier_id
+            if actor.id == conversation.customer_id
+            else conversation.customer_id
+        )
+        await NotificationService(
+            devices=DeviceTokenRepository(db), push=request.app.state.clients.push
+        ).notify_user(
+            user_id=recipient,
+            title="New message",
+            body="You have a new message about your order.",
+        )
     return _message(dto)
 
 

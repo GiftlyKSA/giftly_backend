@@ -95,6 +95,32 @@ class PaymentRepository:
         )
         return result
 
+    async def list_expired_new(self, *, now: datetime, limit: int) -> list[PaymentIntent]:
+        """Return NEW intents whose expiry has passed (oldest first)."""
+        return list(
+            await self._session.scalars(
+                select(PaymentIntent)
+                .where(
+                    PaymentIntent.status == PaymentIntentStatus.NEW,
+                    PaymentIntent.expires_at < now,
+                )
+                .order_by(PaymentIntent.expires_at)
+                .limit(limit)
+            )
+        )
+
+    async def lock_intent(self, intent_id: uuid.UUID) -> PaymentIntent | None:
+        """Load a payment intent by id FOR UPDATE."""
+        result: PaymentIntent | None = await self._session.scalar(
+            select(PaymentIntent).where(PaymentIntent.id == intent_id).with_for_update()
+        )
+        return result
+
+    async def mark_expired(self, intent: PaymentIntent) -> None:
+        """Transition a still-NEW intent to EXPIRED."""
+        intent.status = PaymentIntentStatus.EXPIRED
+        await self._session.flush()
+
     async def mark_paid(self, intent: PaymentIntent, *, paid_at: datetime) -> None:
         """Transition an intent to PAID, stamping the settlement time."""
         intent.status = PaymentIntentStatus.PAID

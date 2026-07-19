@@ -211,3 +211,22 @@ explicit / consistent option was chosen) and environment-forced deviations, date
   error. Unread counters live on the conversation (customer/courier); a send bumps the
   recipient's, mark-read zeroes the reader's and flips `is_read` on inbound messages (the
   only mutation the append-only trigger allows).
+- **2026-07-19** — Notifications (Phase 13): push is BEST-EFFORT (failures are logged and
+  swallowed) and the body never carries Restricted data — a new-message push says only
+  "New message", never the text. Device tokens are unique across users, so registering a
+  handed-down device re-points it to the new owner. Notifications are wired at the ROUTER
+  boundary (create-order broadcast to city couriers, chat-message push to the recipient) so
+  the money-critical services keep pure signatures and their tests untouched.
+- **2026-07-19** — Expiry sweeper (`run_expire_stale`, 10 min, Redis-locked): an ISSUED
+  invoice past its window is EXPIRED — its held wallet funds are released, its open gateway
+  intent is EXPIRED, its promo reservation is returned, and the order reopens to ASSIGNED so
+  the courier can re-issue. Driving order-payment expiry off the INVOICE (not the intent)
+  avoids the race where a late webhook settles an invoice the sweeper already reopened.
+  Wallet-top-up intents expire independently (no money was held).
+- **2026-07-19** — Key rotation (`app.rotate_keys`): only the MUTABLE Restricted columns are
+  re-encrypted to the active version (courier identity ids, the chat preview, IBANs), each
+  under its original AAD. `messages.content` is append-only (the `enforce_message_append_only`
+  trigger forbids updating content), so messages are never rotated in place and old key
+  versions must remain in `FIELD_ENCRYPTION_KEYS` while any message references them. A blob's
+  version is read from its first byte (`crypto.blob_version`) so already-active values are
+  skipped and rotation is idempotent.

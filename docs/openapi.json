@@ -208,6 +208,25 @@
         "title": "DeliverRequest",
         "type": "object"
       },
+      "DeviceResponse": {
+        "description": "A registered device token.",
+        "properties": {
+          "device_os": {
+            "title": "Device Os",
+            "type": "string"
+          },
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "device_os"
+        ],
+        "title": "DeviceResponse",
+        "type": "object"
+      },
       "DisputeRequest": {
         "additionalProperties": false,
         "description": "Open a dispute on an order.",
@@ -1034,6 +1053,29 @@
         "title": "RefreshRequest",
         "type": "object"
       },
+      "RegisterDeviceRequest": {
+        "additionalProperties": false,
+        "description": "Register (or refresh) a push token for the caller's device.",
+        "properties": {
+          "device_os": {
+            "description": "IOS or ANDROID.",
+            "title": "Device Os",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "device_os"
+        ],
+        "title": "RegisterDeviceRequest",
+        "type": "object"
+      },
       "RegisterRequest": {
         "additionalProperties": false,
         "description": "Create an account authorised by a registration token.",
@@ -1409,6 +1451,23 @@
           "created_at"
         ],
         "title": "TransactionResponse",
+        "type": "object"
+      },
+      "UnregisterDeviceRequest": {
+        "additionalProperties": false,
+        "description": "Remove a push token.",
+        "properties": {
+          "token": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "UnregisterDeviceRequest",
         "type": "object"
       },
       "UploadUrlRequest": {
@@ -2305,6 +2364,81 @@
         "summary": "Development liveness marker",
         "tags": [
           "dev"
+        ]
+      }
+    },
+    "/api/devices": {
+      "delete": {
+        "description": "Remove a push token (only if it belongs to the caller).",
+        "operationId": "unregister_device_api_devices_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnregisterDeviceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unregister Device",
+        "tags": [
+          "devices"
+        ]
+      },
+      "post": {
+        "description": "Register or refresh a push token for the caller.",
+        "operationId": "register_device_api_devices_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterDeviceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Register Device",
+        "tags": [
+          "devices"
         ]
       }
     },

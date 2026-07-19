@@ -161,6 +161,21 @@ class InvoiceRepository:
             )
         )
 
+    async def list_expired_issued(self, *, now: datetime, limit: int) -> list[Invoice]:
+        """Return ISSUED invoices whose expiry has passed (oldest first)."""
+        return list(
+            await self._session.scalars(
+                select(Invoice)
+                .where(
+                    Invoice.status == InvoiceStatus.ISSUED,
+                    Invoice.expires_at.is_not(None),
+                    Invoice.expires_at < now,
+                )
+                .order_by(Invoice.expires_at)
+                .limit(limit)
+            )
+        )
+
     async def list_receipt_pending(self, limit: int) -> list[Invoice]:
         """Return PAID invoices whose receipt has not been sent, oldest first.
 

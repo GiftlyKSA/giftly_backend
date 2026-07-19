@@ -18,6 +18,7 @@ from app.core.money import money_str
 from app.models import Dispute, Order
 from app.models.enums import OrderStatus, UserRole
 from app.repositories.courier_repository import CourierRepository
+from app.repositories.device_token_repository import DeviceTokenRepository
 from app.repositories.dispute_repository import DisputeRepository
 from app.repositories.invoice_repository import InvoiceRepository
 from app.repositories.message_repository import MessageWriter
@@ -39,6 +40,7 @@ from app.schemas.orders import (
 from app.services.fulfillment_service import DeliveryInput, FulfillmentService
 from app.services.media_service import MediaService
 from app.services.money_service import MoneyService
+from app.services.notification_service import NotificationService
 from app.services.order_service import NewOrderInput, OrderService
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
@@ -71,6 +73,12 @@ def _fulfillment(request: Request, db: AsyncSession) -> FulfillmentService:
         money=MoneyService(WalletRepository(db)),
         media=MediaService(request.app.state.clients.storage, get_settings(request)),
         settings=get_settings(request),
+    )
+
+
+def _notifier(request: Request, db: AsyncSession) -> NotificationService:
+    return NotificationService(
+        devices=DeviceTokenRepository(db), push=request.app.state.clients.push
     )
 
 
@@ -113,6 +121,12 @@ async def create_order(
             delivery_date=body.delivery_date,
             request_media_keys=body.request_media_keys,
         ),
+    )
+    # Best-effort radar ping to couriers in the city (SPEC SECTION 13; deferred from P6).
+    await _notifier(request, db).notify_city_couriers(
+        city=order.delivery_city,
+        title="New gift request nearby",
+        body="A customer just posted a new order in your city.",
     )
     return await _detail(db, order, actor)
 

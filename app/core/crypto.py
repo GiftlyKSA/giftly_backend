@@ -95,6 +95,21 @@ class FieldCipher:
         return pt.decode("utf-8")
 
 
+def blob_version(blob_b64: str) -> int:
+    """Return the key version a stored ciphertext was written under.
+
+    Raises:
+        CryptoError: The blob is not valid base64 or is too short to carry a version.
+    """
+    try:
+        blob = base64.b64decode(blob_b64, validate=True)
+    except (ValueError, TypeError) as exc:
+        raise CryptoError("Ciphertext is not valid base64.") from exc
+    if len(blob) < _VERSION_BYTES:
+        raise CryptoError("Ciphertext blob is too short.")
+    return blob[0]
+
+
 def build_aad(table: str, column: str, entity_id: str) -> str:
     """Build the AAD context string that binds a ciphertext to its row and column."""
     return f"{table}:{column}:{entity_id}"
