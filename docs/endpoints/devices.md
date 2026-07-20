@@ -32,6 +32,9 @@ Scheduled TaskIQ tasks, each Redis-locked so only one worker runs a sweep at a t
 - `run_expire_stale` (10 min) — expire lapsed unpaid invoices (release the held wallet
   funds, expire the open gateway intent, return the promo, reopen the order to ASSIGNED)
   and stale wallet-top-up intents.
+- `run_purge_refresh_tokens` (nightly) — delete refresh tokens expired longer than
+  `REFRESH_TOKEN_RETENTION_DAYS` (default 30), keeping a forensic window for
+  reuse-detection while bounding table growth.
 
 ## Key rotation (SPEC SECTION 17.1)
 `uv run python -m app.rotate_keys` re-encrypts the **mutable** Restricted columns

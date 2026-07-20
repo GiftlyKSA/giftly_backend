@@ -24,6 +24,7 @@ from app.models.enums import PromoDiscountType, UserRole, UserStatus, WalletType
 from app.repositories.admin_read_repository import AdminReadRepository
 from app.repositories.admin_session_repository import AdminSessionRepository
 from app.repositories.audit_repository import AuditRepository
+from app.repositories.auth_repository import AuthRepository
 from app.repositories.courier_repository import CourierRepository
 from app.repositories.promo_repository import PromoRepository
 from app.repositories.user_repository import UserRepository
@@ -47,13 +48,15 @@ def _settings() -> Settings:
     return make_test_settings(**overrides)
 
 
-def _admin_service(db: AsyncSession, settings: Settings) -> AdminService:
+def _admin_service(db: AsyncSession, settings: Settings, redis: Redis) -> AdminService:
     return AdminService(
         reads=AdminReadRepository(db),
         users=UserRepository(db),
         couriers=CourierRepository(db),
         promos=PromoRepository(db),
         audit=AuditRepository(db),
+        auth_repo=AuthRepository(db),
+        redis=redis,
         settings=settings,
     )
 
@@ -82,8 +85,8 @@ async def _admin(db: AsyncSession) -> User:
     return admin
 
 
-async def test_overview_and_reads(db_session: AsyncSession) -> None:
-    service = _admin_service(db_session, _settings())
+async def test_overview_and_reads(db_session: AsyncSession, redis_client: Redis) -> None:
+    service = _admin_service(db_session, _settings(), redis_client)
     overview = await service.overview()
     assert set(overview.system_balances) >= {"SYSTEM_ESCROW", "SYSTEM_GATEWAY"}
     assert await service.list_orders() is not None
@@ -96,9 +99,11 @@ async def test_overview_and_reads(db_session: AsyncSession) -> None:
     assert await service.list_audit_logs() is not None
 
 
-async def test_verify_courier_and_reveal_identity(db_session: AsyncSession) -> None:
+async def test_verify_courier_and_reveal_identity(
+    db_session: AsyncSession, redis_client: Redis
+) -> None:
     settings = _settings()
-    service = _admin_service(db_session, settings)
+    service = _admin_service(db_session, settings, redis_client)
     admin = await _admin(db_session)
 
     courier = User(
@@ -132,9 +137,9 @@ async def test_verify_courier_and_reveal_identity(db_session: AsyncSession) -> N
     assert revealed["national_id"] == "1122334455"
 
 
-async def test_reveal_iban(db_session: AsyncSession) -> None:
+async def test_reveal_iban(db_session: AsyncSession, redis_client: Redis) -> None:
     settings = _settings()
-    service = _admin_service(db_session, settings)
+    service = _admin_service(db_session, settings, redis_client)
     admin = await _admin(db_session)
     courier = await _admin(db_session)  # any user id works as courier_id here
 
@@ -161,8 +166,8 @@ async def test_reveal_iban(db_session: AsyncSession) -> None:
     assert iban == "SA0380000000608010167519"
 
 
-async def test_ban_and_promo_management(db_session: AsyncSession) -> None:
-    service = _admin_service(db_session, _settings())
+async def test_ban_and_promo_management(db_session: AsyncSession, redis_client: Redis) -> None:
+    service = _admin_service(db_session, _settings(), redis_client)
     admin = await _admin(db_session)
     target = await _admin(db_session)
 

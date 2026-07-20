@@ -1,10 +1,11 @@
 """Fixed-window request rate limiting backed by Redis (SPEC SECTION 17.2 A04).
 
-A single Redis counter per identity per window: ``INCR`` the key, set its expiry on
-first hit, and reject once the count crosses the ceiling. The design mirrors the OTP
-throttle so there is one throttling idiom in the codebase. It is deliberately
-**fail-open**: a Redis outage must not take the whole API down, so a backend error
-lets the request through (and is logged) rather than surfacing a 500.
+A single Redis counter per identity per window, advanced by one atomic Lua eval —
+``INCR``, TTL set (or repair), and ceiling check in one round trip, so a crash can
+never strand a counter without an expiry. The design mirrors the OTP throttle so
+there is one throttling idiom in the codebase. It is deliberately **fail-open**: a
+Redis outage must not take the whole API down, so a backend error lets the request
+through (and is logged) rather than surfacing a 500.
 """
 
 from __future__ import annotations
@@ -15,6 +16,22 @@ from dataclasses import dataclass
 from redis.asyncio import Redis
 
 _logger = logging.getLogger("app.ratelimit")
+
+# One atomic round trip (audit SEC-6/PERF-5): INCR, set/repair the TTL (a TTL of -1
+# means a crash stranded the counter without an expiry), and return the retry-after
+# seconds when over the ceiling, else 0.
+_WINDOW_LUA = """
+local count = redis.call('INCR', KEYS[1])
+if count == 1 or redis.call('TTL', KEYS[1]) < 0 then
+    redis.call('EXPIRE', KEYS[1], ARGV[1])
+end
+if count > tonumber(ARGV[2]) then
+    local ttl = redis.call('TTL', KEYS[1])
+    if ttl > 0 then return ttl end
+    return tonumber(ARGV[1])
+end
+return 0
+"""
 
 
 @dataclass(frozen=True)
@@ -52,12 +69,8 @@ class RateLimiter:
         """
         key = self._key(identity)
         try:
-            count = await self._redis.incr(key)
-            if count == 1:
-                await self._redis.expire(key, self._window)
-            if count > self._max:
-                ttl = await self._redis.ttl(key)
-                retry_after = ttl if isinstance(ttl, int) and ttl > 0 else self._window
+            retry_after = int(await self._redis.eval(_WINDOW_LUA, 1, key, self._window, self._max))
+            if retry_after > 0:
                 return RateLimitDecision(allowed=False, retry_after_seconds=retry_after)
             return RateLimitDecision(allowed=True, retry_after_seconds=0)
         except Exception:  # noqa: BLE001 — fail-open: availability over strict limiting.

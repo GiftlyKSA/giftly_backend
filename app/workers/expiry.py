@@ -16,10 +16,11 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from app.core.config import Settings, get_settings
 from app.core.db import build_engine, build_session_factory
+from app.core.locks import LockNotAcquiredError, redis_lock
 from app.core.money import ZERO
 from app.core.redis import build_redis
 from app.models.enums import (
@@ -27,6 +28,7 @@ from app.models.enums import (
     OrderStatus,
     PaymentPurpose,
 )
+from app.repositories.auth_repository import AuthRepository
 from app.repositories.invoice_repository import InvoiceRepository
 from app.repositories.order_repository import OrderRepository
 from app.repositories.payment_repository import PaymentRepository
@@ -144,11 +146,56 @@ async def run_expire_stale() -> None:
     settings = get_settings()
     redis = build_redis(settings)
     try:
-        acquired = await redis.set(_LOCK_KEY, "1", nx=True, ex=_LOCK_TTL_SECONDS)
-        if not acquired:
-            _logger.info("expiry sweep already running elsewhere; skipping")
-            return
-        await expire_stale()
+        # Lua compare-and-delete release (audit SEC-5): if this run outlives the TTL
+        # and a peer re-acquires, releasing must not free the peer's lock.
+        async with redis_lock(redis, _LOCK_KEY, ttl_seconds=_LOCK_TTL_SECONDS):
+            await expire_stale()
+    except LockNotAcquiredError:
+        _logger.info("expiry sweep already running elsewhere; skipping")
     finally:
-        await redis.delete(_LOCK_KEY)
+        await redis.aclose()
+
+
+async def purge_refresh_tokens(
+    *, factory: object | None = None, settings: Settings | None = None
+) -> int:
+    """Delete refresh tokens expired for longer than the retention window (audit PERF-3).
+
+    Rotation inserts a row per refresh and nothing else ever deletes them; without this
+    sweep the table grows without bound. Rows are only removed once they have been
+    expired for ``REFRESH_TOKEN_RETENTION_DAYS``, so reuse-detection forensics keep a
+    full window of history.
+
+    Returns:
+        The number of rows deleted.
+    """
+    settings = settings or get_settings()
+    own_engine = None
+    if factory is None:
+        own_engine = build_engine(settings)
+        factory = build_session_factory(own_engine)
+    cutoff = datetime.now(UTC) - timedelta(days=settings.REFRESH_TOKEN_RETENTION_DAYS)
+    try:
+        async with factory() as session:  # type: ignore[operator]
+            deleted = await AuthRepository(session).purge_expired(before=cutoff)
+            await session.commit()
+        if deleted:
+            _logger.info("purged %d expired refresh tokens", deleted)
+        return deleted
+    finally:
+        if own_engine is not None:
+            await own_engine.dispose()
+
+
+@broker.task(schedule=[{"cron": "0 4 * * *"}])
+async def run_purge_refresh_tokens() -> None:
+    """Nightly task: acquire a lock and purge long-expired refresh tokens."""
+    settings = get_settings()
+    redis = build_redis(settings)
+    try:
+        async with redis_lock(redis, "job:purge_refresh_tokens", ttl_seconds=120):
+            await purge_refresh_tokens()
+    except LockNotAcquiredError:
+        _logger.info("refresh-token purge already running elsewhere; skipping")
+    finally:
         await redis.aclose()

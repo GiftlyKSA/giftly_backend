@@ -12,14 +12,35 @@ zero-sum invariant are re-checked by :meth:`reconcile`, which pages on any drift
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
+
+from sqlalchemy.exc import IntegrityError
 
 from app.core.exceptions import InsufficientFundsError
 from app.core.money import ZERO, quantize_money
 from app.models.enums import TransactionStatus, TransactionType, WalletType
 from app.repositories.wallet_repository import WalletRepository
+
+_logger = logging.getLogger("app.money")
+
+
+def _validate_legs(legs: list[Leg]) -> None:
+    """Reject a group that is not a well-formed double entry.
+
+    Raises:
+        LedgerImbalanceError: Fewer than two legs, a zero leg, or a non-zero sum.
+    """
+    if len(legs) < 2:
+        raise LedgerImbalanceError("A ledger group needs at least two legs.")
+    total = sum((leg.amount for leg in legs), ZERO)
+    if quantize_money(total) != ZERO:
+        raise LedgerImbalanceError(f"Ledger group does not sum to zero (got {total}).")
+    for leg in legs:
+        if quantize_money(leg.amount) == ZERO:
+            raise LedgerImbalanceError("A ledger leg amount must be non-zero.")
 
 
 class LedgerImbalanceError(Exception):
@@ -93,45 +114,52 @@ class MoneyService:
             LedgerImbalanceError: The legs do not sum to zero, or a leg amount is zero,
                 or there are fewer than two legs.
         """
-        if len(legs) < 2:
-            raise LedgerImbalanceError("A ledger group needs at least two legs.")
-        total = sum((leg.amount for leg in legs), ZERO)
-        if quantize_money(total) != ZERO:
-            raise LedgerImbalanceError(f"Ledger group does not sum to zero (got {total}).")
-        for leg in legs:
-            if quantize_money(leg.amount) == ZERO:
-                raise LedgerImbalanceError("A ledger leg amount must be non-zero.")
-
+        _validate_legs(legs)
         # Idempotency: a replay is detected by any leg's idempotency key already existing.
+        if await self._any_key_exists(legs):
+            return False
+
+        # The write runs inside a SAVEPOINT (audit MON-1): if a truly concurrent group
+        # with the same idempotency key wins the unique-index race, the savepoint rolls
+        # back cleanly and the replay is reported as a no-op instead of a 500.
+        try:
+            async with self._wallets.savepoint():
+                locked = await self._wallets.lock_wallets([leg.wallet_id for leg in legs])
+                for leg in legs:
+                    wallet = locked[leg.wallet_id]
+                    wallet.balance = quantize_money(wallet.balance + leg.amount)
+                    wallet.version += 1
+                    self._wallets.append_transaction(
+                        wallet_id=leg.wallet_id,
+                        amount=quantize_money(leg.amount),
+                        txn_type=leg.txn_type,
+                        status=TransactionStatus.SETTLED,
+                        correlation_id=correlation_id,
+                        balance_after=wallet.balance,
+                        idempotency_key=leg.idempotency_key,
+                        reference_order_id=leg.reference_order_id,
+                        reference_invoice_id=leg.reference_invoice_id,
+                        reference_intent_id=leg.reference_intent_id,
+                        description=leg.description,
+                    )
+                # Flush so this group is durable before any later group's FOR UPDATE
+                # reload: a `SELECT ... FOR UPDATE` repopulates wallet rows and would
+                # otherwise discard these still-pending in-memory balance updates.
+                await self._wallets.flush()
+        except IntegrityError:
+            if await self._any_key_exists(legs):
+                return False
+            raise
+        return True
+
+    async def _any_key_exists(self, legs: list[Leg]) -> bool:
+        """Return whether any leg's idempotency key is already in the ledger."""
         for leg in legs:
             if leg.idempotency_key and await self._wallets.idempotency_key_exists(
                 leg.idempotency_key
             ):
-                return False
-
-        locked = await self._wallets.lock_wallets([leg.wallet_id for leg in legs])
-        for leg in legs:
-            wallet = locked[leg.wallet_id]
-            wallet.balance = quantize_money(wallet.balance + leg.amount)
-            wallet.version += 1
-            self._wallets.append_transaction(
-                wallet_id=leg.wallet_id,
-                amount=quantize_money(leg.amount),
-                txn_type=leg.txn_type,
-                status=TransactionStatus.SETTLED,
-                correlation_id=correlation_id,
-                balance_after=wallet.balance,
-                idempotency_key=leg.idempotency_key,
-                reference_order_id=leg.reference_order_id,
-                reference_invoice_id=leg.reference_invoice_id,
-                reference_intent_id=leg.reference_intent_id,
-                description=leg.description,
-            )
-        # Flush so this group is durable before any later group's FOR UPDATE reload:
-        # a `SELECT ... FOR UPDATE` repopulates wallet rows and would otherwise discard
-        # these still-pending in-memory balance updates.
-        await self._wallets.flush()
-        return True
+                return True
+        return False
 
     async def credit_topup(
         self,
@@ -341,6 +369,15 @@ class MoneyService:
         amount = quantize_money(amount)
         locked = await self._wallets.lock_wallets([wallet_id])
         wallet = locked[wallet_id]
+        if amount > wallet.held_balance:
+            # A release larger than the outstanding hold is always a bug upstream
+            # (audit MON-2): clamp for safety, but say so loudly.
+            _logger.warning(
+                "release_hold over-release on wallet %s: releasing %s but held is %s",
+                wallet_id,
+                amount,
+                wallet.held_balance,
+            )
         wallet.held_balance = quantize_money(max(ZERO, wallet.held_balance - amount))
         wallet.version += 1
         await self._wallets.flush()
@@ -426,16 +463,20 @@ class MoneyService:
         """
         drifts: list[str] = []
         wallets = await self._wallets.all_wallets()
+        # One GROUP BY instead of a SUM per wallet (audit PERF-2); a wallet with no
+        # transactions must sum to zero.
+        settled_sums = await self._wallets.settled_sums_by_wallet()
         for wallet in wallets:
-            settled = await self._wallets.settled_balance(wallet.id)
+            settled = settled_sums.get(wallet.id, ZERO)
             if quantize_money(settled) != quantize_money(wallet.balance):
                 drifts.append(
                     f"wallet {wallet.id} balance {wallet.balance} != settled sum {settled}"
                 )
-        sums = await self._wallets.correlation_settled_sums()
-        for correlation_id, total in sums.items():
-            if quantize_money(total) != ZERO:
-                drifts.append(f"correlation {correlation_id} settled sum {total} != 0.00")
+        # The zero-sum check runs SQL-side; only violators come back (audit PERF-2).
+        for correlation_id, total in (await self._wallets.correlation_drift_sums()).items():
+            drifts.append(f"correlation {correlation_id} settled sum {total} != 0.00")
         return ReconcileReport(
-            wallets_checked=len(wallets), correlations_checked=len(sums), drifts=drifts
+            wallets_checked=len(wallets),
+            correlations_checked=await self._wallets.correlation_count(),
+            drifts=drifts,
         )

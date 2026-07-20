@@ -29,12 +29,18 @@ class RealPaylinkClient(PaymentGateway):
         base_url: str = "https://restapi.paylink.sa",
         timeout_seconds: float = 15.0,
     ) -> None:
-        """Hold live credentials and the webhook secret."""
+        """Hold live credentials, the webhook secret, and one pooled HTTP client."""
         self._api_id = api_id
         self._secret_key = secret_key
         self._webhook_secret = webhook_secret.encode("utf-8")
         self._base_url = base_url.rstrip("/")
-        self._timeout = timeout_seconds
+        # One long-lived client (audit PERF-1): connection pooling and TLS reuse
+        # instead of a fresh handshake on every charge — this is the payment path.
+        self._client = httpx.AsyncClient(timeout=timeout_seconds)
+
+    async def aclose(self) -> None:
+        """Close the pooled HTTP client (wired to app shutdown)."""
+        await self._client.aclose()
 
     async def create_charge(
         self, *, amount: Decimal, order_number: str, callback_url: str
@@ -48,10 +54,9 @@ class RealPaylinkClient(PaymentGateway):
             "apiId": self._api_id,
             "secretKey": self._secret_key,
         }
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(f"{self._base_url}/api/addInvoice", json=payload)
-            response.raise_for_status()
-            data = response.json()
+        response = await self._client.post(f"{self._base_url}/api/addInvoice", json=payload)
+        response.raise_for_status()
+        data = response.json()
         return GatewayCharge(
             transaction_no=str(data["transactionNo"]),
             payment_url=str(data["url"]),

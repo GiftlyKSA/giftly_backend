@@ -13,6 +13,7 @@ import logging
 
 from app.core.config import Settings, get_settings
 from app.core.db import build_engine, build_session_factory
+from app.core.locks import LockNotAcquiredError, redis_lock
 from app.core.redis import build_redis
 from app.integrations.email.base import EmailClient
 from app.integrations.factory import build_clients
@@ -82,11 +83,11 @@ async def deliver_pending_receipts() -> None:
     settings = get_settings()
     redis = build_redis(settings)
     try:
-        acquired = await redis.set(_LOCK_KEY, "1", nx=True, ex=_LOCK_TTL_SECONDS)
-        if not acquired:
-            _logger.info("receipt sweep already running elsewhere; skipping")
-            return
-        await send_pending_receipts()
+        # Lua compare-and-delete release (audit SEC-5): if this run outlives the TTL
+        # and a peer re-acquires, releasing must not free the peer's lock.
+        async with redis_lock(redis, _LOCK_KEY, ttl_seconds=_LOCK_TTL_SECONDS):
+            await send_pending_receipts()
+    except LockNotAcquiredError:
+        _logger.info("receipt sweep already running elsewhere; skipping")
     finally:
-        await redis.delete(_LOCK_KEY)
         await redis.aclose()

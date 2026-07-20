@@ -243,3 +243,22 @@ explicit / consistent option was chosen) and environment-forced deviations, date
   a dependency is down. Tests keep the limiter off by default (the suite shares one Redis,
   so unauthenticated requests would collide in one `ip:unknown` bucket) and opt in per
   test.
+- **2026-07-20** — Audit-fix batch (every actionable finding from docs/audit/): a ban now
+  revokes ALL live refresh tokens and sets a Redis `auth:banned:<user_id>` flag checked
+  by `require_auth` on every request (one MGET with the denylist), and both refresh and
+  OTP re-login reject BANNED accounts — SEC-1 closed end to end. `PAYLINK_ALLOWED_IPS`
+  is now enforced at the webhook (403 before the HMAC gate). The OTP HMAC key chain is
+  `OTP_HMAC_KEY -> JWT_SECRET -> IDENTITY_FINGERPRINT_PEPPER` — never a constant. WS
+  chat frames are guarded (JSON-only, `WS_MAX_FRAME_BYTES` cap, per-user Redis throttle,
+  mid-connection ban closes the socket) and WS sends now fire the same recipient push as
+  REST. All four scheduled workers release their locks via the Lua compare-and-delete
+  helper. The rate-limit window is one atomic Lua eval (no strandable counter, one round
+  trip). Chunked bodies without a Content-Length are rejected 411. `post_group` runs its
+  write in a SAVEPOINT so a concurrent idempotency-key race degrades to a graceful no-op;
+  an over-release of a hold logs a WARNING before clamping. Real integration clients hold
+  ONE pooled httpx client each (closed on app shutdown). Reconciliation is two SQL
+  aggregates (GROUP BY + HAVING) instead of an O(wallets) loop and an O(ledger) dict. A
+  nightly `run_purge_refresh_tokens` deletes tokens expired past
+  `REFRESH_TOKEN_RETENTION_DAYS`. New knobs are env vars with safe defaults (see
+  .env.example). Deliberately NOT changed: the fail-open API limiter, the WS query-param
+  token, and `statement_cache_size=0` (documented trade-offs, re-confirmed).

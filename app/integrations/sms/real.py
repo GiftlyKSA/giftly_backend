@@ -11,18 +11,21 @@ class RealSmsClient(SmsClient):
     """Sends OTP SMS through the configured provider over HTTPS."""
 
     def __init__(self, provider_key: str, base_url: str, timeout_seconds: float = 10.0) -> None:
-        """Hold the provider credentials."""
+        """Hold the provider credentials and one pooled HTTP client (audit PERF-1)."""
         self._provider_key = provider_key
         self._base_url = base_url.rstrip("/")
-        self._timeout = timeout_seconds
+        self._client = httpx.AsyncClient(timeout=timeout_seconds)
+
+    async def aclose(self) -> None:
+        """Close the pooled HTTP client (wired to app shutdown)."""
+        await self._client.aclose()
 
     async def send_otp(self, phone: str, code: str) -> None:
         """Send the OTP; the code is never logged."""
         # VENDOR CONTRACT — refine against the chosen SMS provider's API.
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(
-                f"{self._base_url}/send",
-                json={"to": phone, "message": f"Your SAFE-GIFT code is {code}"},
-                headers={"Authorization": f"Bearer {self._provider_key}"},
-            )
-            response.raise_for_status()
+        response = await self._client.post(
+            f"{self._base_url}/send",
+            json={"to": phone, "message": f"Your SAFE-GIFT code is {code}"},
+            headers={"Authorization": f"Bearer {self._provider_key}"},
+        )
+        response.raise_for_status()

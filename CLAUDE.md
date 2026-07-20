@@ -3,10 +3,11 @@
 SAFE-GIFT is a peer-to-peer custom-gifting marketplace backend. Customers post gift
 requests; verified couriers invoice and deliver; money moves through an escrow ledger.
 
-All 14 build phases are complete. A severity-ranked self-audit lives in `docs/audit/`
-(start at its README); when picking up work here, check the open findings there first —
-SEC-1 (ban does not revoke live tokens) is the top item — and update the audit when a
-finding is fixed or a new risk is introduced.
+All 14 build phases are complete, and every actionable finding from the self-audit in
+`docs/audit/` has been fixed (re-audited 2026-07-20). When picking up work here, read
+the audit's README first — it lists the accepted trade-offs (fail-open API limiter, WS
+query-param token, `statement_cache_size=0`) that must not be "fixed" casually — and
+update the audit whenever a finding changes state or a new risk is introduced.
 
 ## THE HARD RULES
 

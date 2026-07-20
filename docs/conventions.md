@@ -65,6 +65,7 @@ Every error looks like this:
 | 403 | authenticated but not permitted |
 | 404 | not found, or the caller has no relationship to the resource |
 | 409 | state or lock conflict |
+| 411 | body sent without a Content-Length (chunked uploads are not accepted) |
 | 413 | request body too large |
 | 422 | semantically invalid (promo/pricing) |
 | 429 | rate limited (see `Retry-After`) |
@@ -79,8 +80,14 @@ header (seconds until the window resets) — surface a countdown and retry after
 liveness/readiness probes (`/api/health*`) are never throttled.
 
 Request bodies are capped (default **1 MiB**); an oversized body is rejected up front
-with **413 `PAYLOAD_TOO_LARGE`** before any route runs. Media bytes never transit the API
-— clients `PUT` straight to S3 with a pre-signed URL — so this cap only bounds JSON.
+with **413 `PAYLOAD_TOO_LARGE`** before any route runs, and a chunked body that declares
+no `Content-Length` at all is rejected with **411 `LENGTH_REQUIRED`**. Media bytes never
+transit the API — clients `PUT` straight to S3 with a pre-signed URL — so these caps only
+bound JSON.
+
+WebSocket chat frames have their own guards: non-JSON frames, frames over
+`WS_MAX_FRAME_BYTES` (4 KiB), and messages beyond `WS_RATE_LIMIT_MAX_MESSAGES` per window
+(30/min) are silently dropped.
 
 ## Error code catalogue
 
@@ -102,6 +109,7 @@ with **413 `PAYLOAD_TOO_LARGE`** before any route runs. Media bytes never transi
 | `PROMO_USER_LIMIT_REACHED` | 422 | this user's per-user cap reached | inline error |
 | `TOPUP_AMOUNT_OUT_OF_RANGE` | 400 | top-up not in [100, 20000] | inline error |
 | `OUTSIDE_DELIVERY_GEOFENCE` | 403 | courier too far from the drop-off | show distance guidance (never the target coords) |
+| `LENGTH_REQUIRED` | 411 | no Content-Length declared | send a fixed-length body |
 | `PAYLOAD_TOO_LARGE` | 413 | request body over the size cap | shrink the payload |
 | `RATE_LIMITED` | 429 | too many attempts | show `Retry-After` countdown |
 

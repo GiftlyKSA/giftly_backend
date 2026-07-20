@@ -32,8 +32,12 @@ connect — anyone else is closed (4401 unauthenticated, 4403 not a participant)
 
 - **Server → client**: each new message on the conversation is pushed as JSON
   (`id`, `conversation_id`, `sender_id`, `message_type`, `content`, `is_read`, `created_at`).
-- **Client → server**: a text frame (`{"text": "..."}` or raw text) sends a message,
-  exactly as the REST POST would.
+- **Client → server**: a JSON frame `{"text": "..."}` sends a message, exactly as the
+  REST POST would — including the same "New message" push to the recipient. Non-JSON
+  frames are dropped, as are frames over `WS_MAX_FRAME_BYTES` (default 4 KiB), and each
+  sender is throttled to `WS_RATE_LIMIT_MAX_MESSAGES` per window (default 30/min);
+  guarded frames are silently discarded, so treat the REST POST as the source of truth
+  when delivery must be confirmed. A mid-connection ban closes the socket (4401).
 
 Live delivery rides Redis pub/sub (channel `chat:conversation:<id>`), so horizontal
 scaling works: a message sent on one instance reaches sockets on every instance. Chat

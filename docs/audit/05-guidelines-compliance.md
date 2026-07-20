@@ -1,4 +1,4 @@
-# Guidelines-compliance audit
+# Guidelines-compliance audit (re-audited 2026-07-20 after the fix batch)
 
 CLAUDE.md's hard rules, checked rule by rule against the code actually in the tree.
 
@@ -6,46 +6,45 @@ CLAUDE.md's hard rules, checked rule by rule against the code actually in the tr
 
 | Rule | Verdict | Evidence |
 | --- | --- | --- |
-| `uv` only, never `pip` | ✅ Pass | Dockerfile installs uv from its published image and comments "pip is banned" (`Dockerfile:7-8`); CI uses `uv sync --frozen` / `uvx`; no `requirements.txt`, poetry, or pipenv anywhere. |
-| Money is `Decimal`, never `float` | ✅ Pass | `parse_money` **rejects** floats explicitly (`app/core/money.py:42-43`); wire format is strings; the only `float()` calls in the app are coordinates/distance (`order_repository.py:196,217`), which are not money. |
-| Quantize only through `core/money.py` | ✅ Pass | `.quantize` appears only in `money.py`; every service imports `quantize_money`. |
-| Pricing only in `core/pricing.py` | ✅ Pass | `calculate_invoice_totals` / `compute_settlement` are the only price builders; invoice service, preview, receipts, and admin all consume the persisted result. |
-| No raw SQL strings / f-string SQL | ✅ Pass | Swept: zero f-string SQL. The only `text()` outside migrations is the promo atomic claim/release with `:named` params (`promo_repository.py:93-120`) and the readiness `SELECT 1`. |
-| Ownership enforced in the query | ✅ Pass | The `get_for_actor` pattern is used across invoice/order/chat/device repos (e.g. `device_token_repository.remove` deletes `WHERE user_id = :actor AND token = :token`); no fetch-then-compare was found. Actor id comes from the JWT everywhere (`app/core/deps.py`). |
-| Ledger append-only | ✅ Pass | Trigger-enforced (baseline migration :86-99): DELETE forbidden, PENDING→SETTLED\|REVERSED only, core columns immutable. Corrections are compensating entries (dispute flows). |
-| Secrets from env, `SecretStr`, never logged/baked | ✅ Pass | All secret settings are `SecretStr` (`config.py`); logging scrubber in place; CI asserts no secret in image history. |
+| `uv` only, never `pip` | ✅ Pass | Dockerfile installs uv from its published image ("pip is banned"); CI uses `uv sync --frozen` / `uvx`; no `requirements.txt`, poetry, or pipenv anywhere. |
+| Money is `Decimal`, never `float` | ✅ Pass | `parse_money` rejects floats explicitly; wire format is strings; the only `float()` calls are coordinates/distance, which are not money. |
+| Quantize only through `core/money.py` | ✅ Pass | `.quantize` appears only in `money.py`. |
+| Pricing only in `core/pricing.py` | ✅ Pass | `calculate_invoice_totals` / `compute_settlement` are the only price builders. |
+| No raw SQL strings / f-string SQL | ✅ Pass | Swept: zero f-string SQL; only `:named`-param `text()` in the promo repo and the readiness `SELECT 1`. |
+| Ownership enforced in the query | ✅ Pass | `get_for_actor` pattern throughout; actor id from the JWT everywhere. |
+| Ledger append-only | ✅ Pass | Trigger-enforced; corrections are compensating entries. |
+| Secrets from env, `SecretStr`, never logged/baked | ✅ Pass | All secrets (including the new `OTP_HMAC_KEY`) are `SecretStr`; CI asserts a secret-free image. |
 | No healthcare data | ✅ Pass | No such fields, models, or inference anywhere. |
-| Base path `/api`, no version prefix | ✅ Pass | Every router uses `/api/...`; no `/api/v1` exists (swept). |
-| Layering `routers → services → repositories → models` | ✅ Pass* | No service imports FastAPI (swept — zero hits). Routers construct repositories only to inject into services (DI wiring), and `dev.py` does one read via `PaymentRepository` to build a simulated webhook — dev-only, acceptable, noted. |
-| `ST_MakePoint` longitude first | ✅ Pass | All three call sites lng-first (`order_repository.py:60,89,211`). |
-| `ST_Distance` on `geography` for metres | ✅ Pass | Both operands cast (`order_repository.py:214`). |
-| Redis lock release via Lua compare-and-delete | ⚠️ **Partial** | `core/locks.py` implements it and the webhook path uses it — but all four scheduled workers hand-roll `SET NX EX` + plain `DEL` (see SEC-5). The rule is violated by the codebase's own workers. |
-| Sync SDK in async → `run_in_threadpool` | ✅ Pass | No sync SDK exists; every real client is async httpx/aioboto3. |
-| Webhook signature over the raw body | ✅ Pass | `request.body()` bytes go straight to `verify_webhook_signature` (`webhooks.py:28,40`); the dev simulate route signs the same raw bytes. |
-| Conventional Commits | ✅ Pass | Full history conforms (`feat|fix|ci|docs` etc.). |
+| Base path `/api`, no version prefix | ✅ Pass | Every router uses `/api/...`. |
+| Layering `routers → services → repositories → models` | ✅ Pass* | No service imports FastAPI (swept). Routers construct repositories only as DI wiring; `dev.py`'s single read stays dev-only. |
+| `ST_MakePoint` longitude first | ✅ Pass | All call sites lng-first. |
+| `ST_Distance` on `geography` for metres | ✅ Pass | Both operands cast. |
+| Redis lock release via Lua compare-and-delete | ✅ **Pass (fixed)** | Previously partial (SEC-5): all five scheduled jobs now use `core/locks.redis_lock`; the plain-`DEL` pattern is gone from the codebase. |
+| Sync SDK in async → `run_in_threadpool` | ✅ Pass | No sync SDK exists; every real client is async httpx/aioboto3 (now pooled). |
+| Webhook signature over the raw body | ✅ Pass | `request.body()` bytes go straight to verification; the IP gate added by SEC-2 runs before the body is even read. |
+| Conventional Commits | ✅ Pass | Full history conforms. |
 | Google-style docstrings (ruff D) | ✅ Pass | Enforced by CI; ruff is clean. |
-| Docs updated with every contract move | ✅ Pass | Every phase shipped endpoint docs + regenerated `openapi.json`; CI fails on a stale spec. |
-| Tests for every behaviour change | ✅ Pass | 210 tests, 87.9 % coverage against an 85 % CI gate. |
+| Docs updated with every contract move | ✅ Pass | The fix batch updated conventions (411, WS guards), chat/payments/devices endpoint docs, and `.env.example`; CI fails on a stale OpenAPI spec. |
+| Tests for every behaviour change | ✅ Pass | 217 tests, 87.9 % coverage against an 85 % CI gate; every audit fix that changed behaviour carries a test. |
 | Never commit a secret / real `.env` | ✅ Pass | `.env.example` is all placeholders; secret-scanning job in CI. |
-| Naming conventions (SPEC §7) | ✅ Pass | Plural snake_case tables, UUID `id` PKs, `_amount`/`_balance` money suffixes, `_encrypted` suffixes — spot-checked across `tables.py`. |
+| Naming conventions (SPEC §7) | ✅ Pass | Plural snake_case tables, UUID `id` PKs, `_amount`/`_balance`/`_encrypted` suffixes. |
 
-\* One deviation and one dev-only exception, both noted in place.
+\* One dev-only exception, noted in place.
 
-## Config hygiene findings
+## Config hygiene (re-checked)
 
-- **Dead config**: `PAYLINK_ALLOWED_IPS` is validated as required in production but
-  never read again (SEC-2). Config that promises unenforced controls should be wired
-  or removed.
-- **Cross-mode secret reuse**: the OTP HMAC borrows `JWT_SECRET` and silently degrades
-  under RS256 (SEC-3). Rule-of-thumb worth adopting: every secret has exactly one
-  purpose, and the boot validator covers every algorithm combination.
-- Everything else in `config.py`'s interlock is genuinely enforced and tested
-  (DEBUG/docs/CORS/fake-gating all have assertions in the suite).
+- The two first-pass findings in this category are closed: `PAYLINK_ALLOWED_IPS` is
+  now enforced where the config promises it (SEC-2), and the OTP HMAC key chain ends
+  on a validated secret in every algorithm mode (SEC-3).
+- Every tunable the fix batch introduced is an env var with a safe default, documented
+  in `.env.example`: `OTP_HMAC_KEY`, `REFRESH_TOKEN_RETENTION_DAYS`,
+  `RATE_LIMIT_ENABLED/MAX_REQUESTS/WINDOW_SECONDS`, `MAX_REQUEST_BODY_BYTES`,
+  `WS_RATE_LIMIT_MAX_MESSAGES/WINDOW_SECONDS`, `WS_MAX_FRAME_BYTES`.
+- The boot interlock's promises were re-swept: everything `config.py` validates is
+  genuinely enforced somewhere, and nothing enforced is unvalidated.
 
 ## Summary
 
-22 rules checked: **21 pass, 1 partial** (worker lock release — SEC-5, a
-four-file mechanical fix using the existing `redis_lock` helper). The codebase
-practises what its CLAUDE.md preaches to an unusually high degree; the two config
-findings are about promises the config makes that the code doesn't keep, which is the
-same failure class in the opposite direction.
+22 rules checked: **22 pass** (the single partial from the first pass — worker lock
+release — is fixed). The one first-pass deviation class, "config that promises a
+control the code doesn't keep", has no remaining instances.

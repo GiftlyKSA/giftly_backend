@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
 from app.core.db import build_engine, build_session_factory
+from app.core.locks import LockNotAcquiredError, redis_lock
 from app.core.redis import build_redis
 from app.integrations.factory import build_clients
 from app.repositories.dispute_repository import DisputeRepository
@@ -83,11 +84,11 @@ async def run_auto_approve() -> None:
     settings = get_settings()
     redis = build_redis(settings)
     try:
-        acquired = await redis.set(_LOCK_KEY, "1", nx=True, ex=_LOCK_TTL_SECONDS)
-        if not acquired:
-            _logger.info("auto-approve already running elsewhere; skipping")
-            return
-        await auto_approve_delivered()
+        # Lua compare-and-delete release (audit SEC-5): if this run outlives the TTL
+        # and a peer re-acquires, releasing must not free the peer's lock.
+        async with redis_lock(redis, _LOCK_KEY, ttl_seconds=_LOCK_TTL_SECONDS):
+            await auto_approve_delivered()
+    except LockNotAcquiredError:
+        _logger.info("auto-approve already running elsewhere; skipping")
     finally:
-        await redis.delete(_LOCK_KEY)
         await redis.aclose()

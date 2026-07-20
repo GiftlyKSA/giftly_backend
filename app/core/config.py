@@ -105,6 +105,17 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW_SECONDS: int = 60
     MAX_REQUEST_BODY_BYTES: int = 1_048_576
 
+    # WebSocket chat guards (audit SEC-4/LOG-3): per-user message throttle + frame cap.
+    WS_RATE_LIMIT_MAX_MESSAGES: int = 30
+    WS_RATE_LIMIT_WINDOW_SECONDS: int = 60
+    WS_MAX_FRAME_BYTES: int = 4096
+
+    # Dedicated OTP HMAC key (audit SEC-3); optional — see OtpService for the fallback.
+    OTP_HMAC_KEY: SecretStr | None = None
+
+    # Retention for consumed/expired refresh tokens (audit PERF-3).
+    REFRESH_TOKEN_RETENTION_DAYS: int = 30
+
     # Business rules
     DEFAULT_VAT_RATE: Decimal = Decimal("0.15")
     SERVICE_FEE_RATE: Decimal = Decimal("0.05")

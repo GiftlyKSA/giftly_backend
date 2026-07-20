@@ -73,8 +73,13 @@ async def require_auth(request: Request) -> Actor:
         raise UnauthorizedError("Invalid or expired token.") from exc
 
     redis = get_redis(request)
-    if await redis.get(f"jwt:denylist:{claims.jti}"):
+    # One round trip: the logout denylist and the ban flag (audit SEC-1 — a ban must
+    # kill access tokens already in the wild, not just block new logins).
+    denylisted, banned = await redis.mget(f"jwt:denylist:{claims.jti}", f"auth:banned:{claims.sub}")
+    if denylisted:
         raise UnauthorizedError("This session has been revoked.")
+    if banned:
+        raise UnauthorizedError("This account has been suspended.")
 
     try:
         role = UserRole(claims.role)

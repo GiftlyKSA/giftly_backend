@@ -21,6 +21,7 @@ from app.models import AdminSession, User
 from app.repositories.admin_read_repository import AdminReadRepository
 from app.repositories.admin_session_repository import AdminSessionRepository
 from app.repositories.audit_repository import AuditRepository
+from app.repositories.auth_repository import AuthRepository
 from app.repositories.courier_repository import CourierRepository
 from app.repositories.promo_repository import PromoRepository
 from app.repositories.user_repository import UserRepository
@@ -90,7 +91,7 @@ def build_auth_service(
     )
 
 
-def build_admin_service(db: AsyncSession, settings: Settings) -> AdminService:
+def build_admin_service(db: AsyncSession, settings: Settings, redis: Redis) -> AdminService:
     """Assemble the admin operations service for a request."""
     return AdminService(
         reads=AdminReadRepository(db),
@@ -98,6 +99,8 @@ def build_admin_service(db: AsyncSession, settings: Settings) -> AdminService:
         couriers=CourierRepository(db),
         promos=PromoRepository(db),
         audit=AuditRepository(db),
+        auth_repo=AuthRepository(db),
+        redis=redis,
         settings=settings,
     )
 
@@ -123,7 +126,7 @@ async def require_admin(request: Request, db: AsyncSession) -> AdminContext:
         admin=admin,
         db=db,
         auth=auth,
-        service=build_admin_service(db, settings),
+        service=build_admin_service(db, settings, redis),
         csrf_token=auth.csrf_token_for(session_row.session_token_hash),
     )
 

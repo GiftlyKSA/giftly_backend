@@ -23,9 +23,16 @@ class OtpService:
         self._redis = redis
         self._sms = sms
         self._settings = settings
-        # The OTP HMAC key: the JWT secret is a >=32-byte app secret already validated
-        # at boot. The code is ephemeral (180s TTL); this protects a Redis dump.
-        self._hmac_key = settings.JWT_SECRET.get_secret_value() if settings.JWT_SECRET else "otp"
+        # The OTP HMAC key (audit SEC-3): a dedicated OTP_HMAC_KEY wins; otherwise fall
+        # back to the JWT secret, then the identity pepper — every mode (including
+        # RS256, where JWT_SECRET is absent) ends on a boot-validated >=32-byte secret,
+        # never a constant. The code is ephemeral (180s TTL); this protects a Redis dump.
+        if settings.OTP_HMAC_KEY is not None:
+            self._hmac_key = settings.OTP_HMAC_KEY.get_secret_value()
+        elif settings.JWT_SECRET is not None:
+            self._hmac_key = settings.JWT_SECRET.get_secret_value()
+        else:
+            self._hmac_key = settings.IDENTITY_FINGERPRINT_PEPPER.get_secret_value()
 
     def _code_key(self, phone: str) -> str:
         return f"otp:code:{phone}"
@@ -53,7 +60,9 @@ class OtpService:
             raise RateLimitedError(self._settings.OTP_BLOCK_SECONDS)
 
         count = await self._redis.incr(self._rate_key(phone))
-        if count == 1:
+        # First hit sets the window; TTL<0 repairs a counter stranded by a crash
+        # between INCR and EXPIRE (audit SEC-6) so nobody is throttled forever.
+        if count == 1 or await self._redis.ttl(self._rate_key(phone)) < 0:
             await self._redis.expire(self._rate_key(phone), self._settings.OTP_WINDOW_SECONDS)
         if count > self._settings.OTP_MAX_PER_WINDOW:
             await self._redis.set(self._block_key(phone), "1", ex=self._settings.OTP_BLOCK_SECONDS)
@@ -80,7 +89,7 @@ class OtpService:
             RateLimitedError: Too many verification attempts for this code.
         """
         attempts = await self._redis.incr(self._attempts_key(phone))
-        if attempts == 1:
+        if attempts == 1 or await self._redis.ttl(self._attempts_key(phone)) < 0:
             await self._redis.expire(self._attempts_key(phone), self._settings.OTP_TTL_SECONDS)
         if attempts > 5:
             await self._redis.delete(self._code_key(phone))

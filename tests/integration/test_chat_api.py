@@ -278,3 +278,87 @@ def _verify_courier_sync(client: TestClient, app: object, phone: str) -> None:
             await engine.dispose()
 
     asyncio.run(_do())
+
+
+def test_websocket_send_persists_notifies_and_guards() -> None:
+    """WS sends behave like REST sends (audit LOG-1/LOG-3/SEC-4).
+
+    A JSON frame is persisted and fires a text-free push to the recipient; a non-JSON
+    frame and an oversized frame are dropped without persisting anything.
+    """
+    settings = _settings()
+    engine = build_engine(settings)
+    factory = build_session_factory(engine)
+    import asyncio
+
+    async def _probe() -> None:
+        try:
+            async with factory() as s:
+                await s.execute(select(User.id).limit(1))
+        finally:
+            await engine.dispose()
+
+    try:
+        asyncio.run(_probe())
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"database unavailable: {exc}")
+
+    app = create_app(settings)
+    with TestClient(app) as client:
+        cust = _register_sync(client, app, _phone(), "CUSTOMER")
+        courier_phone = _phone()
+        _register_sync(
+            client, app, courier_phone, "COURIER", city="Jeddah", national_id=_phone()[1:]
+        )
+        _verify_courier_sync(client, app, courier_phone)
+        courier = _login_sync(client, app, courier_phone)
+        cust_h = {"Authorization": f"Bearer {cust['access_token']}"}
+        cour_h = {"Authorization": f"Bearer {courier['access_token']}"}
+
+        created = client.post(
+            "/api/orders",
+            headers=cust_h,
+            json={
+                "delivery_city": "Jeddah",
+                "latitude": 21.5,
+                "longitude": 39.2,
+                "delivery_date": _future(),
+                "request_media_keys": [],
+            },
+        )
+        order_id = created.json()["id"]
+        client.post(f"/api/orders/{order_id}/accept", headers=cour_h)
+        conv_id = client.get("/api/conversations", headers=cour_h).json()["items"][0][
+            "conversation_id"
+        ]
+
+        # The customer (recipient) has a registered device.
+        import secrets as _secrets
+
+        client.post(
+            "/api/devices",
+            headers=cust_h,
+            json={"token": f"tok-{_secrets.token_hex(6)}", "device_os": "IOS"},
+        )
+        push = app.state.clients.push
+        pushes_before = len(push.sent)
+
+        import json as _json
+
+        token = courier["access_token"]
+        with client.websocket_connect(f"/api/ws/conversations/{conv_id}?token={token}") as ws:
+            ws.send_text("not json at all")  # rejected: WS frames must be JSON
+            ws.send_text(_json.dumps({"text": "x" * 5000}))  # dropped: over the frame cap
+            ws.send_text(_json.dumps({"text": "hello from the socket"}))
+            event = ws.receive_json()  # our message echoes back via pub/sub
+            assert event["content"] == "hello from the socket"
+
+        # Exactly one message persisted, and the push carries NO message text.
+        msgs = client.get(f"/api/conversations/{conv_id}/messages", headers=cust_h).json()["items"]
+        contents = [m["content"] for m in msgs]
+        # The accept-flow system message plus OUR one message; the guarded frames never landed.
+        assert contents.count("hello from the socket") == 1
+        assert "not json at all" not in contents
+        assert all(len(c) <= 4096 for c in contents)
+        assert len(push.sent) == pushes_before + 1
+        assert "hello" not in push.sent[-1].body

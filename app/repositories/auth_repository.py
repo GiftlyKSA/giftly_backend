@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import CourierProfile, RefreshToken, User, Wallet
@@ -125,3 +125,24 @@ class AuthRepository:
             .values(revoked_at=now)
         )
         await self._session.flush()
+
+    async def revoke_all_for_user(self, user_id: uuid.UUID, now: datetime) -> None:
+        """Revoke every live refresh token a user holds (ban — audit SEC-1)."""
+        await self._session.execute(
+            update(RefreshToken)
+            .where(RefreshToken.user_id == user_id, RefreshToken.revoked_at.is_(None))
+            .values(revoked_at=now)
+        )
+        await self._session.flush()
+
+    async def purge_expired(self, *, before: datetime) -> int:
+        """Delete refresh tokens whose expiry predates ``before`` (audit PERF-3).
+
+        Returns:
+            The number of rows deleted.
+        """
+        result = await self._session.execute(
+            delete(RefreshToken).where(RefreshToken.expires_at < before)
+        )
+        await self._session.flush()
+        return int(getattr(result, "rowcount", 0) or 0)

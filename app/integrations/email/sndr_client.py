@@ -23,12 +23,16 @@ class SndrEmailClient(EmailClient):
         from_name: str,
         timeout_seconds: float = 10.0,
     ) -> None:
-        """Hold the vendor configuration for later sends."""
+        """Hold the vendor configuration and one pooled HTTP client (audit PERF-1)."""
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._from_email = from_email
         self._from_name = from_name
-        self._timeout = timeout_seconds
+        self._client = httpx.AsyncClient(timeout=timeout_seconds)
+
+    async def aclose(self) -> None:
+        """Close the pooled HTTP client (wired to app shutdown)."""
+        await self._client.aclose()
 
     async def send_transactional(
         self, to_email: str, template_key: str, variables: dict[str, object]
@@ -42,8 +46,7 @@ class SndrEmailClient(EmailClient):
             "variables": variables,
         }
         headers = {"Authorization": f"Bearer {self._api_key}"}
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(
-                f"{self._base_url}/v1/transactional", json=payload, headers=headers
-            )
-            response.raise_for_status()
+        response = await self._client.post(
+            f"{self._base_url}/v1/transactional", json=payload, headers=headers
+        )
+        response.raise_for_status()

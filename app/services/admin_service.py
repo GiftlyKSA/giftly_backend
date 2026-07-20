@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 
+from redis.asyncio import Redis
+
 from app.core.config import Settings
 from app.core.crypto import build_aad, build_cipher
 from app.core.exceptions import NotFoundError
@@ -22,6 +24,7 @@ from app.models import CourierProfile, Withdrawal
 from app.models.enums import PromoDiscountType, UserStatus
 from app.repositories.admin_read_repository import AdminReadRepository
 from app.repositories.audit_repository import AuditRepository
+from app.repositories.auth_repository import AuthRepository
 from app.repositories.courier_repository import CourierRepository
 from app.repositories.promo_repository import PromoRepository
 from app.repositories.user_repository import UserRepository
@@ -48,14 +51,18 @@ class AdminService:
         couriers: CourierRepository,
         promos: PromoRepository,
         audit: AuditRepository,
+        auth_repo: AuthRepository,
+        redis: Redis,
         settings: Settings,
     ) -> None:
-        """Wire the repositories and settings the admin operations need."""
+        """Wire the repositories, Redis, and settings the admin operations need."""
         self._reads = reads
         self._users = users
         self._couriers = couriers
         self._promos = promos
         self._audit = audit
+        self._auth_repo = auth_repo
+        self._redis = redis
         self._settings = settings
 
     @staticmethod
@@ -230,11 +237,24 @@ class AdminService:
     async def set_user_banned(
         self, *, admin_id: uuid.UUID, user_id: uuid.UUID, banned: bool, ip: str | None
     ) -> None:
-        """Ban or unban a user and audit it."""
+        """Ban or unban a user, revoke their live sessions, and audit it.
+
+        A ban must end access immediately (audit SEC-1): every live refresh token is
+        revoked, and a Redis flag outliving the access-token TTL kills the tokens
+        already in the wild — ``require_auth`` checks it on every request.
+        """
         user = await self._users.get(user_id)
         if user is None:
             raise NotFoundError("User not found.")
         await self._users.set_status(user, UserStatus.BANNED if banned else UserStatus.ACTIVE)
+        banned_key = f"auth:banned:{user_id}"
+        if banned:
+            await self._auth_repo.revoke_all_for_user(user_id, datetime.now(UTC))
+            await self._redis.set(
+                banned_key, "1", ex=self._settings.JWT_ACCESS_TTL_MINUTES * 60 + 60
+            )
+        else:
+            await self._redis.delete(banned_key)
         await self._audit.record(
             actor_user_id=admin_id,
             action="USER_BAN" if banned else "USER_UNBAN",

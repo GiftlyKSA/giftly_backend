@@ -1,100 +1,79 @@
-# Performance audit
+# Performance audit (re-audited 2026-07-20 after the fix batch)
 
 Context: a city-scoped gifting marketplace — hundreds of requests/second is the
-realistic ceiling, not tens of thousands. Findings are graded against that reality;
-nothing here is an emergency, but PERF-1 and PERF-2 will bite first as volume grows.
+realistic ceiling, not tens of thousands. Every graded finding from the first pass is
+now fixed; what remains is the accepted-trade-off list.
 
 ## What holds up well
 
-- **Index coverage matches the query surface** (`app/models/tables.py`): composite
-  indexes on `(delivery_city, status)` for the radar, `(customer_id, created_at DESC)`
-  for lists, a GiST index on `delivery_location`, partial indexes on nullable uniques
-  (`idempotency_key`, `email`, `promo_id`), and worker-sweep indexes (receipt-pending,
-  auto-approve-due, expiry). The sweepers are index-backed with LIMIT batches, not
-  table scans.
-- **Pagination is capped everywhere it is exposed**: every list route validates
-  `limit` with `Query(ge=1, le=100)` (`app/routers/orders.py:140`, `chat.py:67,99`,
-  etc.) and uses keyset cursors, not OFFSET.
-- **The event loop is respected**: every real integration is async httpx or aioboto3
-  (`app/integrations/*/real.py`) — a sweep found no sync SDK call in an async path.
+- **Index coverage matches the query surface**: composite indexes on
+  `(delivery_city, status)`, `(customer_id, created_at DESC)`, a GiST index on
+  `delivery_location`, partial indexes on nullable uniques, and worker-sweep indexes.
+  The sweepers are index-backed with LIMIT batches, not table scans.
+- **Pagination is capped everywhere**: every list route validates `limit` with
+  `Query(ge=1, le=100)` and uses keyset cursors, not OFFSET.
+- **The event loop is respected**: every real integration is async httpx or aioboto3;
+  no sync SDK call exists in an async path.
 - **Hot money paths are lean**: `post_group` is one SELECT FOR UPDATE + N inserts +
-  one flush; webhook settlement touches exactly the rows it settles.
+  one flush (now inside a savepoint, which on Postgres is a near-free nested marker).
 
-## Findings
+## Findings and their resolutions
 
-### PERF-1 (Medium) — A fresh `httpx.AsyncClient` per outbound call
+### PERF-1 (Medium) — FIXED — Pooled HTTP clients everywhere
 
-Every real client builds and tears down an `AsyncClient` inside each call:
-`app/integrations/paylink/real.py:51`, `push/real.py:22`, `sms/real.py:22`,
-`email/sndr_client.py:45`. That is a new connection pool, TCP handshake, and TLS
-negotiation per gateway charge, SMS, push, and email — typically 50–150 ms of avoidable
-latency on the *payment* path, and it defeats HTTP/1.1 keep-alive entirely.
+Each real integration client (`paylink`, `push`, `sms`, `sndr` email) now creates
+**one** `httpx.AsyncClient` in `__init__` and reuses it for every call — connection
+pooling and TLS session reuse instead of a handshake per gateway charge/SMS/push/
+email. Each exposes `aclose()`, and a new app shutdown hook (`_install_shutdown` in
+`app/main.py`) closes the clients, the Redis pool, and the engine. Fakes are skipped
+via duck-typing.
 
-**Recommendation**: give each real client one long-lived `AsyncClient` (created in
-`__init__`, closed via an `aclose()` hooked to app shutdown), or share one client on
-`app.state`. This is the highest-leverage performance fix in the codebase.
+### PERF-2 (Medium) — FIXED — Reconciliation is O(1) queries, O(violations) memory
 
-### PERF-2 (Medium) — Reconciliation scales with the entire ledger
+`reconcile()` now runs `settled_sums_by_wallet()` (one GROUP BY over settled
+transactions) instead of a SUM per wallet, and `correlation_drift_sums()`
+(`GROUP BY correlation_id HAVING SUM(amount) != 0`) so only violators — normally zero
+rows — cross the wire, plus one distinct-count for the report. The nightly job no
+longer materialises the entire ledger's correlation map in Python. A `checked_through`
+watermark remains a possible future refinement if the ledger reaches the tens of
+millions of rows; not needed at target scale.
 
-`MoneyService.reconcile` (`app/services/money_service.py:420-441`):
+### PERF-3 (Low) — FIXED — `refresh_tokens` is bounded
 
-1. loads **every** wallet, then issues one `SUM` query per wallet (N+1 —
-   `wallet_repository.settled_balance` per row);
-2. `correlation_settled_sums` materialises a dict of **every correlation group ever
-   posted** — unbounded memory, and the nightly runtime grows linearly with ledger
-   history forever.
+The nightly `run_purge_refresh_tokens` task (Redis-locked, own-engine pattern like the
+other sweeps) deletes rows expired for longer than `REFRESH_TOKEN_RETENTION_DAYS`
+(env var, default 30) — keeping a full forensic window for reuse detection while
+bounding growth. Verified by `test_purge_refresh_tokens_deletes_only_long_expired`.
+`admin_sessions` and `audit_log` retention remain deliberate keep-forever choices for
+now (audit trail).
 
-Fine at 10⁴ transactions; a problem at 10⁷. The job holds only a Redis lock, so a slow
-run also overlaps its own 600 s TTL (see SEC-5's plain-DEL interaction).
+### PERF-4 (Low) — FIXED — Guard middlewares merged
 
-**Recommendation**: replace the per-wallet loop with a single
-`GROUP BY wallet_id` aggregate joined against balances, and make the correlation check
-a SQL-side `GROUP BY correlation_id HAVING SUM(amount) != 0` that returns only
-violators. Both become one query each, O(violations) memory. Optionally add a
-watermark (`checked_through` timestamp) so settled history is verified once, not
-nightly forever.
+The rate limiter and body-size guard are now one `_request_guards` middleware
+(body check first — it is free — then the throttle), taking the stack from four
+`BaseHTTPMiddleware` layers to three. Pure-ASGI implementations remain the next step
+if p99 latency ever matters; not warranted today.
 
-### PERF-3 (Low) — `refresh_tokens` grows without bound
+### PERF-5 (Info) — FIXED (free with SEC-6) — One round trip per throttle check
 
-Rotation inserts a new row per refresh (`app/services/auth_service.py:235-243`) and
-nothing ever deletes used/expired/revoked rows. At one refresh per user per 30 minutes
-of active use, this table becomes the largest in the database within months, and the
-`token_hash` lookups stay fast (indexed) while backups and vacuums pay the bill.
+The Lua window script folded INCR + EXPIRE + TTL into a single eval, so the happy path
+costs exactly one Redis round trip and the blocked path the same.
 
-**Recommendation**: a small nightly sweep — delete rows where
-`expires_at < now() - interval '30 days'` — using the existing worker pattern.
-(`admin_sessions` and `audit_log` deserve the same retention decision, deliberately.)
+### PERF-6 (Info) — Accepted — Per-request service construction
 
-### PERF-4 (Low) — Four stacked `BaseHTTPMiddleware` layers
-
-`_install_middleware` (`app/main.py`) registers security-headers, rate-limit, and
-body-guard via `@app.middleware("http")` plus the class-based `RequestIdMiddleware` —
-all four are Starlette `BaseHTTPMiddleware`, each wrapping the request in an extra
-task/anyio scope. Measured overhead is tens of microseconds each; it is not a today
-problem, but it is the first thing a profiler will show. The rate-limit and body-guard
-checks could fold into one middleware, and pure-ASGI implementations would remove the
-task-per-layer cost if p99 latency ever matters.
-
-### PERF-5 (Info) — Rate limiter costs 2 Redis round-trips per request
-
-`INCR` + (first-hit) `EXPIRE`, plus `TTL` when blocked (`app/core/ratelimit.py:55-60`).
-A single Lua eval would make it one round trip and simultaneously fix SEC-6's
-atomicity gap — one change, two findings.
-
-### PERF-6 (Info) — Per-request service/repository construction
-
-Routers assemble services and repositories per request (e.g.
-`build_payment_service`). These are thin dataclass-like objects; construction cost is
-negligible and the pattern buys session-scoped correctness. No action — noted so
-nobody "optimises" it into shared-session bugs.
+Services and repositories are thin objects constructed per request; the pattern buys
+session-scoped correctness for negligible cost. Noted so nobody "optimises" it into
+shared-session bugs.
 
 ## Capacity notes
 
 - Uvicorn workers behind Gunicorn, async DB pool with `pool_pre_ping`: standard and
   sound. Pool sizing is left to SQLAlchemy defaults (5 + 10 overflow per worker) —
-  fine to start; set explicitly once worker count × pool size approaches PgBouncer's
-  budget.
-- Redis is a single point for OTP, locks, rate limits, denylist, and chat pub/sub.
-  All uses are O(1) commands; chat fan-out is per-conversation channels. No concern at
-  target scale, but chat pub/sub is the first thing to move to its own instance if
-  Redis CPU ever climbs.
+  set explicitly once worker count × pool size approaches PgBouncer's budget.
+- Redis backs OTP, locks, rate limits (HTTP + WS), the denylist/ban flags, and chat
+  pub/sub. All uses are O(1) commands; chat fan-out is per-conversation channels.
+  No concern at target scale; chat pub/sub is the first candidate for its own
+  instance if Redis CPU ever climbs.
+- The app shutdown hook uses FastAPI's `on_event` (deprecated in favour of lifespan
+  but fully functional); migrate to a lifespan context manager whenever the factory
+  is next reworked.

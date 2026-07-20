@@ -24,7 +24,7 @@ from app.core.jwt import (
     decode_registration_token,
 )
 from app.core.security import generate_session_token, hmac_hex, sha256_hex
-from app.models.enums import UserRole
+from app.models.enums import UserRole, UserStatus
 from app.repositories.auth_repository import AuthRepository
 from app.repositories.user_repository import UserRepository
 from app.services.otp_service import OtpService
@@ -90,6 +90,9 @@ class AuthService:
         if user is None:
             token = create_registration_token(self._settings, phone=phone)
             return VerifyResult(is_new_user=True, tokens=None, registration_token=token)
+        if user.status is UserStatus.BANNED:
+            # A ban blocks fresh logins too, not just live tokens (audit SEC-1).
+            raise UnauthorizedError("This account has been suspended.")
         tokens = await self._issue_tokens(user.id, user.role.value)
         return VerifyResult(is_new_user=False, tokens=tokens, registration_token=None)
 
@@ -214,6 +217,9 @@ class AuthService:
         user = await self._users.get(row.user_id)
         if user is None:
             raise UnauthorizedError("Account no longer exists.")
+        if user.status is UserStatus.BANNED:
+            # A banned account must not mint fresh tokens (audit SEC-1).
+            raise UnauthorizedError("This account has been suspended.")
         access, _, _ = create_access_token(self._settings, user_id=user.id, role=user.role.value)
         new_refresh = await self._new_refresh(user.id, row.family_id)
         return TokenPair(access_token=access, refresh_token=new_refresh, role=user.role.value)

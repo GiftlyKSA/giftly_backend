@@ -41,16 +41,19 @@ gateway.
 | 409 | INSUFFICIENT_FUNDS | a concurrent debit consumed the held balance |
 
 ## POST /api/webhooks/paylink
-The gateway payment callback. **PUBLIC** — no JWT; authenticated only by the
-`X-Paylink-Signature` HMAC over the **raw** request body. Settlement is idempotent at
-three layers: a Redis lock on the transaction number, the intent's own status check, and
-the ledger's idempotency keys — a duplicate delivery is a no-op.
+The gateway payment callback. **PUBLIC** — no JWT; authenticated by the
+`X-Paylink-Signature` HMAC over the **raw** request body, plus a source-IP allowlist
+(`PAYLINK_ALLOWED_IPS`, enforced when set — required in production) as defence in
+depth. Settlement is idempotent at three layers: a Redis lock on the transaction
+number, the intent's own status check, and the ledger's idempotency keys — a duplicate
+delivery is a no-op.
 ### Body (raw JSON, signature verified before parsing)
 `{ transaction_no, status, amount }`
 ### Success 200 — WebhookAck
 `{ outcome }` — one of `processed`, `already_processed`, `failed`.
 ### Errors
 | status | code | when |
+| 403 | FORBIDDEN | the source IP is not on the allowlist |
 | 401 | INVALID_SIGNATURE | the HMAC does not match the raw body |
 | 400 | PAYMENT_AMOUNT_MISMATCH | the webhook amount != the intent amount |
 | 404 | NOT_FOUND | no intent matches the transaction number |

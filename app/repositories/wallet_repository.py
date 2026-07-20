@@ -12,7 +12,7 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import func, select, tuple_
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
 
 from app.models import Transaction, Wallet
 from app.models.enums import TransactionStatus, TransactionType, WalletType
@@ -24,6 +24,10 @@ class WalletRepository:
     def __init__(self, session: AsyncSession) -> None:
         """Bind the repository to a session."""
         self._session = session
+
+    def savepoint(self) -> AsyncSessionTransaction:
+        """Open a SAVEPOINT so a caller can survive a constraint race (audit MON-1)."""
+        return self._session.begin_nested()
 
     async def get_by_user(self, user_id: uuid.UUID) -> Wallet | None:
         """Return a user's wallet, or None."""
@@ -139,11 +143,38 @@ class WalletRepository:
         """Return every wallet (for reconciliation)."""
         return list(await self._session.scalars(select(Wallet)))
 
-    async def correlation_settled_sums(self) -> dict[uuid.UUID, Decimal]:
-        """Return, per correlation_id, the sum of SETTLED transaction amounts."""
+    async def settled_sums_by_wallet(self) -> dict[uuid.UUID, Decimal]:
+        """Return every wallet's SETTLED sum in ONE aggregate (audit PERF-2).
+
+        Replaces a per-wallet SUM loop: reconciliation stays a single query however
+        large the ledger grows. Wallets with no transactions are simply absent.
+        """
+        rows = await self._session.execute(
+            select(Transaction.wallet_id, func.sum(Transaction.amount))
+            .where(Transaction.status == TransactionStatus.SETTLED)
+            .group_by(Transaction.wallet_id)
+        )
+        return {wid: Decimal(total) for wid, total in rows.all()}
+
+    async def correlation_drift_sums(self) -> dict[uuid.UUID, Decimal]:
+        """Return ONLY the correlation groups whose SETTLED sum is not zero.
+
+        The zero-sum check runs SQL-side (``HAVING SUM != 0``, audit PERF-2), so the
+        result is O(violations) — normally empty — instead of the whole ledger.
+        """
         rows = await self._session.execute(
             select(Transaction.correlation_id, func.sum(Transaction.amount))
             .where(Transaction.status == TransactionStatus.SETTLED)
             .group_by(Transaction.correlation_id)
+            .having(func.sum(Transaction.amount) != 0)
         )
         return {cid: Decimal(total) for cid, total in rows.all()}
+
+    async def correlation_count(self) -> int:
+        """Count distinct SETTLED correlation groups (for the reconcile report)."""
+        total = await self._session.scalar(
+            select(func.count(func.distinct(Transaction.correlation_id))).where(
+                Transaction.status == TransactionStatus.SETTLED
+            )
+        )
+        return int(total or 0)

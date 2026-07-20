@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import Actor, get_db, get_redis, get_settings, require_role
 from app.core.jwt import JwtError, decode_access_token
+from app.core.ratelimit import RateLimiter
 from app.models.enums import UserRole
 from app.repositories.chat_repository import ChatRepository
 from app.repositories.device_token_repository import DeviceTokenRepository
@@ -172,6 +173,11 @@ async def conversation_ws(websocket: WebSocket, conversation_id: uuid.UUID) -> N
     if conversation is None:
         await websocket.close(code=4403)  # not a participant
         return
+    recipient_id = (
+        conversation.courier_id
+        if actor.id == conversation.customer_id
+        else conversation.customer_id
+    )
 
     await websocket.accept()
     redis: Redis = websocket.app.state.redis
@@ -179,7 +185,7 @@ async def conversation_ws(websocket: WebSocket, conversation_id: uuid.UUID) -> N
     await pubsub.subscribe(conversation_channel(conversation_id))
     reader = asyncio.create_task(_pump_pubsub_to_socket(pubsub, websocket))
     try:
-        await _pump_socket_to_chat(websocket, conversation_id, actor, factory, redis)
+        await _pump_socket_to_chat(websocket, conversation_id, actor, recipient_id, factory, redis)
     except WebSocketDisconnect:
         pass
     finally:
@@ -202,12 +208,32 @@ async def _pump_socket_to_chat(
     websocket: WebSocket,
     conversation_id: uuid.UUID,
     actor: Actor,
+    recipient_id: uuid.UUID,
     factory: object,
     redis: Redis,
 ) -> None:
+    """Read inbound frames, guard them, persist the message, and push the recipient.
+
+    Guards (audit SEC-4/LOG-2/LOG-3): frames over ``WS_MAX_FRAME_BYTES`` are dropped;
+    each sender is throttled through the shared Redis rate limiter; a mid-connection
+    ban closes the socket. Sends over the socket fire the same best-effort push the
+    REST path fires (audit LOG-1), so the two paths never disagree.
+    """
     settings = websocket.app.state.settings
+    limiter = RateLimiter(
+        redis,
+        max_requests=settings.WS_RATE_LIMIT_MAX_MESSAGES,
+        window_seconds=settings.WS_RATE_LIMIT_WINDOW_SECONDS,
+    )
     while True:
         raw = await websocket.receive_text()
+        if len(raw.encode("utf-8")) > settings.WS_MAX_FRAME_BYTES:
+            continue  # oversized frame: dropped before any decrypt/persist work
+        if await redis.get(f"auth:banned:{actor.id}"):
+            await websocket.close(code=4401)  # banned mid-connection
+            return
+        if not (await limiter.check(f"ws:{actor.id}")).allowed:
+            continue  # over the per-user message ceiling: dropped
         text = _extract_text(raw)
         if not text:
             continue
@@ -216,19 +242,32 @@ async def _pump_socket_to_chat(
             await service.send_message(
                 conversation_id=conversation_id, sender_id=actor.id, text=text
             )
+            # Same best-effort push as the REST path; NO message text in the body.
+            await NotificationService(
+                devices=DeviceTokenRepository(session), push=websocket.app.state.clients.push
+            ).notify_user(
+                user_id=recipient_id,
+                title="New message",
+                body="You have a new message about your order.",
+            )
             await session.commit()
 
 
 def _extract_text(raw: str) -> str:
+    """Extract the message text from a JSON frame; non-JSON frames are rejected.
+
+    The WS contract matches REST (audit LOG-3): a frame must be a JSON object with a
+    ``text`` field. Anything else returns "" and is dropped by the caller.
+    """
     import json
 
     try:
         parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            return str(parsed.get("text", "")).strip()
     except (ValueError, TypeError):
-        pass
-    return raw.strip()
+        return ""
+    if isinstance(parsed, dict):
+        return str(parsed.get("text", "")).strip()
+    return ""
 
 
 async def _authenticate_ws(websocket: WebSocket) -> Actor | None:

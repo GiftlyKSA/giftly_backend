@@ -168,8 +168,9 @@ this source. Start at `docs/README.md`. `docs/openapi.json` is exported by CI.
 `docs/audit/` holds a full self-audit of the finished codebase (security, money
 integrity, logic, performance, and guideline compliance), with severity-ranked
 findings and file:line evidence. Start at `docs/audit/README.md` — the finding index
-table is the executive summary. Highest-priority open item: banning a user does not
-yet revoke their live tokens (SEC-1).
+table is the executive summary. **All 17 actionable findings are fixed** (re-audited
+2026-07-20); what remains is the documented accepted-trade-off list and one
+vendor-blocked item.
 
 ## Troubleshooting
 

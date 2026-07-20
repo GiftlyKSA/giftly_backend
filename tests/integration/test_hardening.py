@@ -41,7 +41,7 @@ async def _skip_unless_db(settings: Settings) -> None:
 class _BoomRedis:
     """A Redis stand-in whose every call raises, to exercise the fail-open path."""
 
-    async def incr(self, key: str) -> int:
+    async def eval(self, *args: object) -> int:
         raise RuntimeError("redis down")
 
 

@@ -62,6 +62,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     _install_middleware(app, settings)
     register_exception_handlers(app)
+    _install_shutdown(app)
     app.include_router(health.router)
 
     from app.routers import (
@@ -129,20 +130,43 @@ def _install_middleware(app: FastAPI, settings: Settings) -> None:
     (bound before any envelope is built), then the rate limiter and body-size guard,
     which short-circuit before a route or the database is ever touched.
     """
-    _install_rate_limit(app, settings)
-    _install_body_size_guard(app, settings)
+    _install_request_guards(app, settings)
     app.add_middleware(RequestIdMiddleware)
     _install_cors(app, settings)
     _install_security_headers(app)
 
 
-def _install_rate_limit(app: FastAPI, settings: Settings) -> None:
-    """Throttle each identity to a fixed window, short-circuiting with a 429."""
+def _guard_body_size(request: Request, settings: Settings) -> Response | None:
+    """Return a rejection response for an oversized or undeclared body, else None.
+
+    A declared ``Content-Length`` over the cap is a 413. A body sent with chunked
+    transfer encoding declares no length at all and would stream past the check
+    (audit SEC-7) — the JSON API never needs chunked uploads (media bytes go straight
+    to S3), so those requests are rejected with 411 Length Required.
+    """
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            length = int(content_length)
+        except ValueError:
+            length = 0
+        if length > settings.MAX_REQUEST_BODY_BYTES:
+            return error_response(413, "PAYLOAD_TOO_LARGE", "The request body is too large.")
+    elif "chunked" in request.headers.get("transfer-encoding", "").lower():
+        return error_response(411, "LENGTH_REQUIRED", "Requests must declare a Content-Length.")
+    return None
+
+
+def _install_request_guards(app: FastAPI, settings: Settings) -> None:
+    """One middleware for both request guards (audit PERF-4): body size, then throttle."""
 
     @app.middleware("http")
-    async def _rate_limit(
+    async def _request_guards(
         request: Request, call_next: Callable[[Request], Awaitable[Response]]
     ) -> Response:
+        rejected = _guard_body_size(request, settings)
+        if rejected is not None:
+            return rejected
         # Health probes and CORS preflight are never throttled.
         if (
             not settings.RATE_LIMIT_ENABLED
@@ -163,24 +187,6 @@ def _install_rate_limit(app: FastAPI, settings: Settings) -> None:
                 "Too many requests. Please try again later.",
                 headers={"Retry-After": str(decision.retry_after_seconds)},
             )
-        return await call_next(request)
-
-
-def _install_body_size_guard(app: FastAPI, settings: Settings) -> None:
-    """Reject a request whose declared body exceeds the configured maximum with a 413."""
-
-    @app.middleware("http")
-    async def _body_size_guard(
-        request: Request, call_next: Callable[[Request], Awaitable[Response]]
-    ) -> Response:
-        content_length = request.headers.get("content-length")
-        if content_length is not None:
-            try:
-                length = int(content_length)
-            except ValueError:
-                length = 0
-            if length > settings.MAX_REQUEST_BODY_BYTES:
-                return error_response(413, "PAYLOAD_TOO_LARGE", "The request body is too large.")
         return await call_next(request)
 
 
@@ -223,6 +229,24 @@ def _install_security_headers(app: FastAPI) -> None:
             if header in response.headers:
                 del response.headers[header]
         return response
+
+
+def _install_shutdown(app: FastAPI) -> None:
+    """Close pooled resources on shutdown: HTTP clients, Redis, and the engine.
+
+    The real integration clients hold long-lived httpx pools (audit PERF-1); a clean
+    shutdown returns their connections. Fakes have no ``aclose`` and are skipped.
+    """
+
+    @app.on_event("shutdown")
+    async def _close_resources() -> None:
+        clients = app.state.clients
+        for client in (clients.gateway, clients.email, clients.sms, clients.push):
+            aclose = getattr(client, "aclose", None)
+            if aclose is not None:
+                await aclose()
+        await app.state.redis.aclose()
+        await app.state.engine.dispose()
 
 
 def _register_admin(app: FastAPI) -> None:
