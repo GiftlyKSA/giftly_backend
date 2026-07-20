@@ -25,11 +25,14 @@ and cannot ask questions. Everything needed to build a screen should be here.
   top-up, delivery & geofence, dispute, chat.
 - `models/` — `enums.md` (every enum value + label) and `schemas.md` (every
   request/response object, field by field).
+- `audit/` — the post-build self-audit (security, money integrity, logic, performance,
+  guideline compliance) with severity-ranked findings. Not needed for UI building, but
+  authoritative on known limitations.
 
 ## Status
 
-The platform is being built in the phase order of the master spec (SECTION 25). The
-foundational layers (config, money, pricing, crypto, the data schema) and their docs
-(`conventions.md`, `flows/invoice-and-pricing.md`, `models/enums.md`) are in place.
-Endpoint docs land with each endpoint's phase; a route change without a doc change fails
-review.
+**Complete.** All 14 phases of the master spec (SECTION 25) are implemented and
+documented: every endpoint group under `endpoints/`, the flows, the models, and the
+exported `openapi.json` reflect the shipped API. A route change without a doc change
+still fails review — these docs stay in lockstep with the contract. Known limitations
+are catalogued in `audit/`.

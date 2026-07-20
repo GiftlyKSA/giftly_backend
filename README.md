@@ -6,15 +6,19 @@ builds an itemised invoice, the customer pays into platform escrow, and funds re
 to the courier only after geofenced, photo-proven delivery is approved. This repository
 is the backend, admin dashboard, and documentation — there is no mobile/web client here.
 
-> Build status: implemented and green — configuration and the production safety
-> interlock, the money/pricing/crypto engines, structured logging with scrubbing, the
-> error envelope, health endpoints, the full data layer (22 tables, constraints,
-> indexes, ledger/immutability triggers, system-wallet seed), the integration doubles,
-> the OTP/session/CSRF security primitives, and the **server-rendered admin dashboard**
-> (auth, CSRF, step-up, and every page in `docs/endpoints/admin.md`). Phases still to
-> come: the auth API, the money/ledger service, the promo engine, orders, invoices,
-> payments, the receipt email, delivery/approval/payout, chat, and background jobs. See
-> `DECISIONS.md` for scope notes and the master spec (SECTION 25) for the phase order.
+> Build status: **all 14 phases implemented and green.** Configuration and the
+> production safety interlock; the money/pricing/crypto engines; the full data layer
+> (22 tables, constraints, indexes, ledger/immutability triggers, system-wallet seed);
+> the OTP→JWT auth API with refresh rotation; the double-entry ledger and wallet
+> endpoints; the promo engine with atomic reservation; orders with the courier radar
+> and geofenced delivery; itemised invoices and pricing; split wallet/gateway payments
+> into escrow with the signed webhook; the receipt email sweeper; delivery, approval,
+> payout, disputes, and ratings; encrypted chat with a live WebSocket; push
+> notifications, the expiry sweeper, and encryption-key rotation; hardening (global
+> rate limiting, body-size guard, real readiness probe); and the **server-rendered
+> admin dashboard**. CI enforces lint, strict types, ≥85 % test coverage, a fresh
+> OpenAPI spec, a non-root image, and secret-free image history. A full self-audit
+> lives in `docs/audit/`; see `DECISIONS.md` for the decision log.
 
 ## Architecture
 
@@ -158,6 +162,14 @@ calls the **same** services as the JSON API — it never queries the DB directly
 
 `docs/` is a first-class deliverable written for a UI-building agent that cannot read
 this source. Start at `docs/README.md`. `docs/openapi.json` is exported by CI.
+
+## Audit
+
+`docs/audit/` holds a full self-audit of the finished codebase (security, money
+integrity, logic, performance, and guideline compliance), with severity-ranked
+findings and file:line evidence. Start at `docs/audit/README.md` — the finding index
+table is the executive summary. Highest-priority open item: banning a user does not
+yet revoke their live tokens (SEC-1).
 
 ## Troubleshooting
 

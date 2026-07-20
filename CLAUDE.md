@@ -3,6 +3,11 @@
 SAFE-GIFT is a peer-to-peer custom-gifting marketplace backend. Customers post gift
 requests; verified couriers invoice and deliver; money moves through an escrow ledger.
 
+All 14 build phases are complete. A severity-ranked self-audit lives in `docs/audit/`
+(start at its README); when picking up work here, check the open findings there first —
+SEC-1 (ban does not revoke live tokens) is the top item — and update the audit when a
+finding is fixed or a new risk is introduced.
+
 ## THE HARD RULES
 
 - **`uv` only, never `pip`.** No `requirements.txt`, poetry, pipenv, virtualenv, conda —
