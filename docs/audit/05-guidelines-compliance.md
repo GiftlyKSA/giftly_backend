@@ -1,4 +1,4 @@
-# Guidelines-compliance audit (re-audited 2026-07-20 after the fix batch)
+# Guidelines-compliance audit (current state, 2026-07-21)
 
 CLAUDE.md's hard rules, checked rule by rule against the code actually in the tree.
 
@@ -33,18 +33,25 @@ CLAUDE.md's hard rules, checked rule by rule against the code actually in the tr
 
 ## Config hygiene (re-checked)
 
-- The two first-pass findings in this category are closed: `PAYLINK_ALLOWED_IPS` is
-  now enforced where the config promises it (SEC-2), and the OTP HMAC key chain ends
-  on a validated secret in every algorithm mode (SEC-3).
-- Every tunable the fix batch introduced is an env var with a safe default, documented
-  in `.env.example`: `OTP_HMAC_KEY`, `REFRESH_TOKEN_RETENTION_DAYS`,
-  `RATE_LIMIT_ENABLED/MAX_REQUESTS/WINDOW_SECONDS`, `MAX_REQUEST_BODY_BYTES`,
-  `WS_RATE_LIMIT_MAX_MESSAGES/WINDOW_SECONDS`, `WS_MAX_FRAME_BYTES`.
+- `PAYLINK_ALLOWED_IPS` is enforced at the webhook and the OTP HMAC key chain ends on a
+  validated secret in every algorithm mode. Every tunable is an env var with a safe
+  default, documented in `.env.example` (`OTP_HMAC_KEY`, `REFRESH_TOKEN_RETENTION_DAYS`,
+  `RATE_LIMIT_*`, `MAX_REQUEST_BODY_BYTES`, `WS_*`).
+- **One caveat, not a rule breach (NF-1)**: the webhook IP allowlist and per-IP rate
+  limiting read the peer address, which behind a proxy is the LB, not the origin. The
+  code keeps its promise *at the socket*; making it keep it *at the origin* is a deploy
+  requirement (`--forwarded-allow-ips`), documented in the README. Not counted against a
+  hard rule, but flagged so the allowlist isn't trusted blindly in a proxied deployment.
+- **One dead config item (NF-2)**: `MIN_WITHDRAWAL_AMOUNT` is defined and read nowhere,
+  because the withdrawal flow is unbuilt. This is the inverse of the closed first-pass
+  finding (config promising an unenforced control) — here a control knob has no feature
+  to govern. Resolve with the NF-2 scope decision.
 - The boot interlock's promises were re-swept: everything `config.py` validates is
   genuinely enforced somewhere, and nothing enforced is unvalidated.
 
 ## Summary
 
-22 rules checked: **22 pass** (the single partial from the first pass — worker lock
-release — is fixed). The one first-pass deviation class, "config that promises a
-control the code doesn't keep", has no remaining instances.
+22 hard rules checked: **22 pass.** No rule is violated by the current tree. The two
+config-hygiene notes above (NF-1 deploy caveat, NF-2 dead knob) are tracked as findings
+rather than rule breaches — one is a deployment requirement, the other rides on the
+withdrawal-scope decision.

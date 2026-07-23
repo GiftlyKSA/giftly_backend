@@ -15,6 +15,10 @@ and cannot ask questions. Everything needed to build a screen should be here.
 
 ## Contents
 
+- `api-4-ui.md` — **the one-file integration reference for the React Native app**:
+  every mobile endpoint with auth, request/response field tables (name, type, required),
+  example input/output, the OTP→JWT auth flow, and end-to-end journeys. Start here to
+  build UI.
 - `conventions.md` — cross-cutting rules every screen relies on.
 - `authentication.md` — the OTP→JWT flow, refresh rotation, and WS tickets.
 - `openapi.json` — the exported OpenAPI schema.

@@ -1,79 +1,57 @@
-# Performance audit (re-audited 2026-07-20 after the fix batch)
+# Performance audit (current state, 2026-07-21)
 
-Context: a city-scoped gifting marketplace — hundreds of requests/second is the
-realistic ceiling, not tens of thousands. Every graded finding from the first pass is
-now fixed; what remains is the accepted-trade-off list.
+Context: a city-scoped gifting marketplace — hundreds of requests/second is the realistic
+ceiling, not tens of thousands. The graded scaling defects from the first pass are fixed;
+what remains here is one deprecation and the accepted trade-offs.
 
 ## What holds up well
 
 - **Index coverage matches the query surface**: composite indexes on
-  `(delivery_city, status)`, `(customer_id, created_at DESC)`, a GiST index on
-  `delivery_location`, partial indexes on nullable uniques, and worker-sweep indexes.
-  The sweepers are index-backed with LIMIT batches, not table scans.
+  `(delivery_city, status)` and `(customer_id, created_at DESC)`, a GiST index on
+  `delivery_location`, partial indexes on nullable uniques, and worker-sweep indexes. The
+  sweepers are index-backed with LIMIT batches, not scans.
 - **Pagination is capped everywhere**: every list route validates `limit` with
   `Query(ge=1, le=100)` and uses keyset cursors, not OFFSET.
-- **The event loop is respected**: every real integration is async httpx or aioboto3;
-  no sync SDK call exists in an async path.
-- **Hot money paths are lean**: `post_group` is one SELECT FOR UPDATE + N inserts +
-  one flush (now inside a savepoint, which on Postgres is a near-free nested marker).
+- **The event loop is respected**: every real integration is async httpx or aioboto3, and
+  each real client now holds **one pooled `httpx.AsyncClient`** (connection + TLS reuse),
+  closed on shutdown — no handshake per gateway charge/SMS/push/email.
+- **Reconciliation is O(1) queries**: two SQL aggregates instead of a per-wallet SUM loop
+  and an in-memory materialisation of the whole correlation map.
+- **Throttling is one round trip**: the rate-limit window is a single Lua eval
+  (INCR + EXPIRE + ceiling), for both the HTTP and WS limiters.
+- **Hot money path is lean**: `post_group` is one SELECT FOR UPDATE + N inserts + one
+  flush, inside a Postgres SAVEPOINT (a near-free nested marker).
+- **Unbounded growth is bounded**: `run_purge_refresh_tokens` (nightly, Redis-locked)
+  deletes tokens expired past `REFRESH_TOKEN_RETENTION_DAYS`.
 
-## Findings and their resolutions
+## Open findings
 
-### PERF-1 (Medium) — FIXED — Pooled HTTP clients everywhere
+### NF-5 (Low) — Shutdown uses the deprecated `on_event`
 
-Each real integration client (`paylink`, `push`, `sms`, `sndr` email) now creates
-**one** `httpx.AsyncClient` in `__init__` and reuses it for every call — connection
-pooling and TLS session reuse instead of a handshake per gateway charge/SMS/push/
-email. Each exposes `aclose()`, and a new app shutdown hook (`_install_shutdown` in
-`app/main.py`) closes the clients, the Redis pool, and the engine. Fakes are skipped
-via duck-typing.
+`_install_shutdown` (`app/main.py`) registers cleanup via `@app.on_event("shutdown")`,
+which FastAPI has deprecated in favour of a lifespan context manager (the deprecation
+warning shows in the test run). It works correctly today — pooled HTTP clients, Redis, and
+the engine are closed — but it should migrate to `lifespan=` the next time the factory is
+reworked, before a future Starlette drops `on_event` entirely.
 
-### PERF-2 (Medium) — FIXED — Reconciliation is O(1) queries, O(violations) memory
+## Accepted trade-offs (re-confirmed)
 
-`reconcile()` now runs `settled_sums_by_wallet()` (one GROUP BY over settled
-transactions) instead of a SUM per wallet, and `correlation_drift_sums()`
-(`GROUP BY correlation_id HAVING SUM(amount) != 0`) so only violators — normally zero
-rows — cross the wire, plus one distinct-count for the report. The nightly job no
-longer materialises the entire ledger's correlation map in Python. A `checked_through`
-watermark remains a possible future refinement if the ledger reaches the tens of
-millions of rows; not needed at target scale.
-
-### PERF-3 (Low) — FIXED — `refresh_tokens` is bounded
-
-The nightly `run_purge_refresh_tokens` task (Redis-locked, own-engine pattern like the
-other sweeps) deletes rows expired for longer than `REFRESH_TOKEN_RETENTION_DAYS`
-(env var, default 30) — keeping a full forensic window for reuse detection while
-bounding growth. Verified by `test_purge_refresh_tokens_deletes_only_long_expired`.
-`admin_sessions` and `audit_log` retention remain deliberate keep-forever choices for
-now (audit trail).
-
-### PERF-4 (Low) — FIXED — Guard middlewares merged
-
-The rate limiter and body-size guard are now one `_request_guards` middleware
-(body check first — it is free — then the throttle), taking the stack from four
-`BaseHTTPMiddleware` layers to three. Pure-ASGI implementations remain the next step
-if p99 latency ever matters; not warranted today.
-
-### PERF-5 (Info) — FIXED (free with SEC-6) — One round trip per throttle check
-
-The Lua window script folded INCR + EXPIRE + TTL into a single eval, so the happy path
-costs exactly one Redis round trip and the blocked path the same.
-
-### PERF-6 (Info) — Accepted — Per-request service construction
-
-Services and repositories are thin objects constructed per request; the pattern buys
-session-scoped correctness for negligible cost. Noted so nobody "optimises" it into
-shared-session bugs.
+- **AT-5** — services/repositories are constructed per request; they are thin objects and
+  the pattern buys session-scoped correctness. Do not "optimise" into shared-session bugs.
+- **AT-6** — `admin_sessions` and `audit_log` are keep-forever (audit trail); give them an
+  explicit retention policy when storage, not correctness, makes it worthwhile.
+- **AT-7** — the real push client hands its full token list to one `send_push`; whether it
+  must chunk to the provider's per-request cap (FCM: 500) can't be verified until real
+  credentials land.
 
 ## Capacity notes
 
-- Uvicorn workers behind Gunicorn, async DB pool with `pool_pre_ping`: standard and
-  sound. Pool sizing is left to SQLAlchemy defaults (5 + 10 overflow per worker) —
-  set explicitly once worker count × pool size approaches PgBouncer's budget.
-- Redis backs OTP, locks, rate limits (HTTP + WS), the denylist/ban flags, and chat
-  pub/sub. All uses are O(1) commands; chat fan-out is per-conversation channels.
-  No concern at target scale; chat pub/sub is the first candidate for its own
-  instance if Redis CPU ever climbs.
-- The app shutdown hook uses FastAPI's `on_event` (deprecated in favour of lifespan
-  but fully functional); migrate to a lifespan context manager whenever the factory
-  is next reworked.
+- Gunicorn + Uvicorn workers, async pool with `pool_pre_ping`: standard and sound. Pool
+  sizing is SQLAlchemy defaults (5 + 10 overflow per worker) — set explicitly once
+  worker-count × pool-size approaches PgBouncer's budget.
+- Redis backs OTP, locks, both rate limiters, the denylist/ban flags, and chat pub/sub —
+  all O(1) commands. It is also now a hard dependency of the authenticated request path
+  (the ban/denylist MGET); chat pub/sub is the first candidate for its own instance if
+  Redis CPU ever climbs.
+- NF-1 (proxy IPs, see security) also has a throughput dimension: without trusted
+  forwarded headers, per-IP throttling can't distinguish clients behind the LB.

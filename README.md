@@ -110,6 +110,27 @@ definition's `secrets`, a Kubernetes `Secret` mounted as env, a systemd
 `EnvironmentFile`, or an uncommitted compose `override`. `docker history` must reveal
 nothing.
 
+### Running behind a proxy or load balancer (required for correct client IPs)
+
+The app reads the peer address (`request.client.host`) for three things: the Paylink
+webhook source-IP allowlist (`PAYLINK_ALLOWED_IPS`), the per-IP rate-limit bucket for
+unauthenticated requests, and admin audit logging. Behind a reverse proxy or load
+balancer this peer is the **proxy**, not the real client, unless you make the ASGI
+server trust the forwarded header from that proxy:
+
+```bash
+# Trust X-Forwarded-For ONLY from your known proxy CIDRs — never "*".
+gunicorn app.main:create_app --factory \
+  --worker-class uvicorn.workers.UvicornWorker \
+  --forwarded-allow-ips="10.0.0.0/8"
+```
+
+Without this, `PAYLINK_ALLOWED_IPS` must list the proxy's egress IP (not Paylink's) or
+it will reject every webhook, and all unauthenticated traffic collapses into a single
+rate-limit bucket. Do not parse `X-Forwarded-For` in application code — trusting a
+client-supplied header is a spoofing footgun; let the server strip it against a trusted
+proxy list. This is audit finding **NF-1** in `docs/audit/`.
+
 ## Running tests, lint, and types
 
 ```bash

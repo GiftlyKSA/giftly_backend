@@ -262,3 +262,13 @@ explicit / consistent option was chosen) and environment-forced deviations, date
   `REFRESH_TOKEN_RETENTION_DAYS`. New knobs are env vars with safe defaults (see
   .env.example). Deliberately NOT changed: the fail-open API limiter, the WS query-param
   token, and `statement_cache_size=0` (documented trade-offs, re-confirmed).
+- **2026-07-21** — Fresh full audit over the remediated tree (docs/audit/ rewritten to a
+  current-state document; the 17 first-pass findings, all closed in ceb44ab, are no longer
+  re-listed — that history is in git). Two new findings need a decision: NF-1 (the peer IP
+  used by the webhook allowlist / rate limiter / audit is the proxy behind an LB — closed
+  by a `--forwarded-allow-ips` deploy flag, now documented in the README, not by app-level
+  X-Forwarded-For parsing) and NF-2 (withdrawals are half-wired: funds enter courier
+  wallets but no code path creates or settles a payout, and MIN_WITHDRAWAL_AMOUNT is dead).
+  NF-2 is deferred pending a product-scope call; the ledger itself is correct. Remaining
+  items (NF-3 WS round-trips, NF-4 ban/Redis dependency, NF-5 on_event deprecation, NF-6
+  test flake) are low/info.
