@@ -54,7 +54,7 @@ class MediaService:
         url = await self._storage.create_upload_url(
             storage_key=storage_key,
             content_type=content_type,
-            max_bytes=self._settings.MAX_UPLOAD_BYTES,
+            byte_size=byte_size,
             ttl_seconds=_UPLOAD_TTL_SECONDS,
         )
         return url, storage_key, _UPLOAD_TTL_SECONDS

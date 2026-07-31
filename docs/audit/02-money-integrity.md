@@ -1,78 +1,54 @@
-# Money-integrity audit (current state, 2026-07-21)
+# Money-integrity audit (2026-07-31)
 
-The ledger and pricing engines are the crown jewels; they were re-read line-by-line,
-including the SAVEPOINT and aggregate-reconcile changes from the remediation pass.
-Verdict: **the invariant machinery is sound and drift-free.** The one open money finding
-is not a correctness bug in the ledger — it is that a whole class of funds has no exit.
+## Verdict
 
-## What holds up well
+The append-only double-entry ledger, pricing engine, escrow settlement, refunds,
+disputes, top-ups, and new courier withdrawals preserve the core invariants. No path
+creates or destroys value. The remaining weakness is visibility into non-ledger holds.
 
-- **Double entry, enforced at runtime** (`app/services/money_service.py`):
-  `_validate_legs` rejects <2 legs, zero legs, and non-zero sums before any DB write;
-  wallets lock FOR UPDATE in ascending-id order; the group flushes before any later
-  group's lock reload. The write runs in a SAVEPOINT so a concurrent idempotency-key
-  race rolls back to a clean no-op instead of a 500 — re-read this pass, the enclosing
-  transaction and pre-savepoint work survive correctly.
-- **Append-only ledger, trigger-enforced**: DELETE forbidden; rows immutable once not
-  PENDING; status only PENDING→SETTLED|REVERSED; core columns immutable.
-- **Pricing exactness** (`app/core/pricing.py`): largest-remainder discount allocation
-  asserted to sum exactly; total reconstructed from its legs and compared; a failed
-  invariant raises rather than returning a wrong price. The 655.50 golden example anchors
-  regression.
-- **Settlement is residual-based**: revenue = `total − tax − courier_payout`, so escrow
-  legs reconstruct the total by construction; courier payout is on the pre-discount base
-  (ADR 0005). The dispute split path bounds-checks `courier_amount ∈ [0, total]`.
-- **Idempotency** on every entry point, backed by a partial unique index; the SAVEPOINT
-  retry makes the true race graceful.
-- **Reconciliation** (re-verified): two SQL aggregates — `settled_sums_by_wallet()`
-  (one GROUP BY) and `correlation_drift_sums()` (`HAVING SUM != 0`, violators only) plus
-  a distinct-count. Same semantics as the old per-wallet loop, O(1) queries.
-- **Holds**: reservations under FOR UPDATE with an available-balance re-check; an
-  over-release logs a WARNING before the safety clamp.
+## Verified invariants
 
-## Open findings
-
-### NF-2 (Medium) — Money enters courier wallets but has no exit
-
-Escrow release on completion credits the courier's wallet
-(`money_service.release_escrow_on_completion`), so couriers accumulate real balance. But
-the **withdrawal side is only half-built**:
-
-- the `withdrawals` table exists (`app/models/tables.py`), the admin dashboard lists
-  withdrawals read-only, `key_rotation_service` rotates withdrawal IBANs, and
-  `AdminService.reveal_iban` decrypts one for a stepped-up admin;
-- yet **no service, repository, or route constructs a `Withdrawal`** (the only
-  `Withdrawal(...)` outside the model is in a test), there is **no state transition** out
-  of `REQUESTED`, and **no ledger method** debits a courier wallet to pay one out;
-- `MIN_WITHDRAWAL_AMOUNT` is defined in settings and read nowhere.
-
-So a courier can earn indefinitely and never cash out, and an admin can view/reveal a
-withdrawal that nothing can create. This is not a ledger-correctness defect — no money is
-mis-moved — but it is a real product gap and a block of dead surface (config + admin
-views + encryption path) with no live counterpart.
-
-**Recommendation**: decide the scope. Either (a) implement the flow — a courier
-`request_withdrawal` (validate `MIN_WITHDRAWAL_AMOUNT` and available balance, encrypt the
-IBAN, place a hold), and an admin settle path that posts a balanced group
-(courier wallet → SYSTEM_GATEWAY) and flips the status — with reconcile-backed tests; or
-(b) explicitly defer it in DECISIONS.md and guard/remove the dead `MIN_WITHDRAWAL_AMOUNT`
-and the admin withdrawal views so the surface doesn't imply a capability that isn't there.
-
-## Accepted trade-offs (re-confirmed)
-
-- **AT-3** — `statement_cache_size=0` for PgBouncer transaction-mode safety; revisit only
-  if PgBouncer is dropped or moved to session mode.
-
-## Verified invariant inventory
-
-| Invariant | Enforced by |
+| Invariant | Enforcement |
 | --- | --- |
-| Every correlation group sums to 0.00 | `_validate_legs` + SQL `HAVING` reconcile |
-| Wallet `balance == SUM(settled)` | Single write path (`post_group`) + `reconcile()` |
-| Ledger rows immutable / append-only | DB triggers |
-| Invoice items frozen once not DRAFT | DB trigger `enforce_invoice_item_freeze` |
-| Discount allocations sum exactly | `PricingIntegrityError` assert |
-| Escrow release legs reconstruct total | Residual construction in `compute_settlement` |
-| Dispute split ∈ [0, total] | `_apply_dispute_outcome` guard (422) |
-| No double settlement of an intent | IP gate + HMAC + Redis lock + status + amount + idempotency + SAVEPOINT |
-| Held funds never exceed balance | FOR UPDATE re-check + DB CHECK + loud clamp |
+| Every posted group has ≥2 non-zero legs and sums to 0.00 | `MoneyService._validate_legs` before write |
+| Wallet balance equals settled ledger sum | single posting path plus reconciliation aggregate |
+| Ledger is append-only | PostgreSQL triggers and ORM write surface |
+| Pricing uses Decimal and one quantizer | `core/money.py` + `core/pricing.py` |
+| Discounts allocate exactly | largest-remainder allocation and integrity exceptions |
+| Escrow release reconstructs invoice total | residual platform revenue calculation |
+| Duplicate payments/settlements are no-ops | stable unique idempotency keys + savepoints |
+| Concurrent wallet debits serialize | ascending `SELECT ... FOR UPDATE` locks |
+
+## Withdrawal flow verified
+
+- Courier request validates configured bounds and available balance, encrypts the IBAN,
+  and increases `held_balance` under the wallet lock.
+- A courier-scoped idempotency key and unique partial index make request retries return
+  the original row without duplicating the hold, including the constraint-race path.
+- Admin decisions lock the withdrawal row. Rejection releases the hold; payment requires
+  approval, debits the courier wallet, credits `SYSTEM_GATEWAY`, releases the hold, and
+  marks `PAID` in one database transaction.
+- Repeated approve/reject/paid actions are idempotent. Audit rows record each first
+  transition. Reconciliation remains clean after payout.
+
+## Finding
+
+### OPEN-3 (Medium) — held balances are not independently reconciled
+
+`held_balance` is intentionally outside the append-only transaction sum because a hold
+is a reservation, not a movement. Row locks prevent oversubscription, and invoice and
+withdrawal paths release their own holds transactionally. The nightly reconciler checks
+ledger balances and zero-sum groups, but it does not derive the expected hold total from
+pending split payments and `REQUESTED|APPROVED` withdrawals. A future bug or manual DB
+repair could therefore strand availability without triggering reconciliation.
+
+Add an aggregate hold report and alert before meaningful transaction volume. Do not
+convert holds into settled ledger entries; that would change the accounting model.
+
+## Operational notes
+
+- `APPROVED` withdrawals intentionally retain funds until an external transfer succeeds
+  or an admin rejects them. Alert on old approved rows.
+- `SYSTEM_GATEWAY` may be negative and represents the platform boundary: top-ups debit
+  it; paid withdrawals credit it.
+- `statement_cache_size=0` remains an accepted PgBouncer transaction-mode trade-off.

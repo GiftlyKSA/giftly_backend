@@ -21,11 +21,11 @@ class FakeStorageClient(StorageClient):
         self._objects: dict[str, ObjectHead] = {}
 
     async def create_upload_url(
-        self, *, storage_key: str, content_type: str, max_bytes: int, ttl_seconds: int
+        self, *, storage_key: str, content_type: str, byte_size: int, ttl_seconds: int
     ) -> str:
         """Register the key as uploaded and return a local simulate URL."""
         self._objects[storage_key] = ObjectHead(
-            exists=True, byte_size=min(max_bytes, 1_843_200), content_type=content_type
+            exists=True, byte_size=byte_size, content_type=content_type
         )
         return f"http://localhost:8000/dev/upload/{storage_key}"
 

@@ -1177,6 +1177,22 @@
         "title": "RegisterRequest",
         "type": "object"
       },
+      "RejectWithdrawalRequest": {
+        "description": "An admin rejection reason for a withdrawal.",
+        "properties": {
+          "reason": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "RejectWithdrawalRequest",
+        "type": "object"
+      },
       "ResolveDisputeRequest": {
         "additionalProperties": false,
         "description": "Admin resolution of a dispute.",
@@ -1830,6 +1846,72 @@
         ],
         "title": "WebhookAck",
         "type": "object"
+      },
+      "WithdrawalRequest": {
+        "description": "A courier request to withdraw available wallet funds.",
+        "properties": {
+          "amount": {
+            "description": "Amount as a decimal string.",
+            "examples": [
+              "250.00"
+            ],
+            "title": "Amount",
+            "type": "string"
+          },
+          "iban": {
+            "description": "Saudi IBAN; encrypted immediately at rest.",
+            "format": "password",
+            "title": "Iban",
+            "type": "string",
+            "writeOnly": true
+          }
+        },
+        "required": [
+          "amount",
+          "iban"
+        ],
+        "title": "WithdrawalRequest",
+        "type": "object"
+      },
+      "WithdrawalResponse": {
+        "description": "A masked courier withdrawal record.",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "iban_last4": {
+            "title": "Iban Last4",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "amount",
+          "iban_last4",
+          "status"
+        ],
+        "title": "WithdrawalResponse",
+        "type": "object"
       }
     }
   },
@@ -1888,6 +1970,148 @@
           }
         },
         "summary": "Resolve Dispute",
+        "tags": [
+          "admin-api"
+        ]
+      }
+    },
+    "/api/admin/withdrawals/{withdrawal_id}/approve": {
+      "post": {
+        "description": "Approve a requested withdrawal while retaining its funds hold.",
+        "operationId": "approve_withdrawal_api_admin_withdrawals__withdrawal_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "withdrawal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Withdrawal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Approve Withdrawal",
+        "tags": [
+          "admin-api"
+        ]
+      }
+    },
+    "/api/admin/withdrawals/{withdrawal_id}/paid": {
+      "post": {
+        "description": "Settle an approved external payout through the append-only ledger.",
+        "operationId": "mark_withdrawal_paid_api_admin_withdrawals__withdrawal_id__paid_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "withdrawal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Withdrawal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Mark Withdrawal Paid",
+        "tags": [
+          "admin-api"
+        ]
+      }
+    },
+    "/api/admin/withdrawals/{withdrawal_id}/reject": {
+      "post": {
+        "description": "Reject a requested or approved withdrawal and release its funds.",
+        "operationId": "reject_withdrawal_api_admin_withdrawals__withdrawal_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "withdrawal_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Withdrawal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectWithdrawalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reject Withdrawal",
         "tags": [
           "admin-api"
         ]
@@ -3599,6 +3823,61 @@
           }
         },
         "summary": "Start Topup",
+        "tags": [
+          "wallets"
+        ]
+      }
+    },
+    "/api/wallets/withdrawals": {
+      "post": {
+        "description": "Reserve funds and create an encrypted courier withdrawal request.",
+        "operationId": "request_withdrawal_api_wallets_withdrawals_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WithdrawalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WithdrawalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Withdrawal",
         "tags": [
           "wallets"
         ]

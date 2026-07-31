@@ -83,3 +83,11 @@ def test_production_wildcard_cors_refuses_boot() -> None:
             _env_file=None,
             **_base_env(ENVIRONMENT="production", CORS_ALLOWED_ORIGINS="*"),
         )
+
+
+def test_invalid_withdrawal_range_refuses_boot() -> None:
+    with pytest.raises(ValueError, match="MAX_WITHDRAWAL_AMOUNT"):
+        Settings(  # type: ignore[call-arg]
+            _env_file=None,
+            **_base_env(MIN_WITHDRAWAL_AMOUNT="100.00", MAX_WITHDRAWAL_AMOUNT="50.00"),
+        )

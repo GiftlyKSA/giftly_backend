@@ -9,22 +9,55 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import Actor, get_db, get_redis, get_settings, require_role
 from app.core.exceptions import NotFoundError
 from app.core.money import money_str, parse_money
+from app.models import Withdrawal
 from app.models.enums import UserRole
+from app.repositories.audit_repository import AuditRepository
 from app.repositories.wallet_repository import WalletRepository
+from app.repositories.withdrawal_repository import WithdrawalRepository
 from app.schemas.payments import TopupRequest, TopupResponse
-from app.schemas.wallets import TransactionPage, TransactionResponse, WalletResponse
+from app.schemas.wallets import (
+    TransactionPage,
+    TransactionResponse,
+    WalletResponse,
+    WithdrawalRequest,
+    WithdrawalResponse,
+)
+from app.services.money_service import MoneyService
 from app.services.payment_service import build_payment_service
+from app.services.withdrawal_service import WithdrawalService
 
 router = APIRouter(prefix="/api/wallets", tags=["wallets"])
 
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 _CustomerOrCourier = require_role(UserRole.CUSTOMER, UserRole.COURIER)
+_Courier = require_role(UserRole.COURIER)
+
+
+def _withdrawals(request: Request, db: AsyncSession) -> WithdrawalService:
+    wallets = WalletRepository(db)
+    return WithdrawalService(
+        withdrawals=WithdrawalRepository(db),
+        wallets=wallets,
+        money=MoneyService(wallets),
+        audit=AuditRepository(db),
+        settings=get_settings(request),
+    )
+
+
+def _withdrawal_response(row: Withdrawal) -> WithdrawalResponse:
+    return WithdrawalResponse(
+        id=str(row.id),
+        amount=money_str(row.amount),
+        iban_last4=row.iban_last4,
+        status=str(row.status),
+        rejection_reason=row.rejection_reason,
+    )
 
 
 @router.get("/me", response_model=WalletResponse)
@@ -63,6 +96,24 @@ async def start_topup(
         amount=money_str(result.amount),
         payment_url=result.payment_url,
     )
+
+
+@router.post("/withdrawals", response_model=WithdrawalResponse, status_code=201)
+async def request_withdrawal(
+    request: Request,
+    db: DbDep,
+    body: WithdrawalRequest,
+    actor: Annotated[Actor, Depends(_Courier)],
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)],
+) -> WithdrawalResponse:
+    """Reserve funds and create an encrypted courier withdrawal request."""
+    row = await _withdrawals(request, db).request_withdrawal(
+        courier_id=actor.id,
+        amount=parse_money(body.amount),
+        iban=body.iban.get_secret_value(),
+        idempotency_key=idempotency_key,
+    )
+    return _withdrawal_response(row)
 
 
 @router.get("/me/transactions", response_model=TransactionPage)

@@ -8,7 +8,8 @@ unrestricted only in development; dev-only routes are registered only in develop
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +40,21 @@ _ADMIN_CSP = (
 )
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Release shared connection pools when the application stops."""
+    try:
+        yield
+    finally:
+        clients = app.state.clients
+        for client in (clients.gateway, clients.email, clients.sms, clients.push):
+            aclose = getattr(client, "aclose", None)
+            if aclose is not None:
+                await aclose()
+        await app.state.redis.aclose()
+        await app.state.engine.dispose()
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     """Build and return the configured FastAPI application."""
     settings = settings or get_settings()
@@ -47,6 +63,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="SAFE-GIFT API",
         version="0.1.0",
+        lifespan=_lifespan,
         docs_url="/docs" if settings.docs_enabled else None,
         redoc_url="/redoc" if settings.docs_enabled else None,
         openapi_url="/openapi.json" if settings.docs_enabled else None,
@@ -62,7 +79,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     _install_middleware(app, settings)
     register_exception_handlers(app)
-    _install_shutdown(app)
     app.include_router(health.router)
 
     from app.routers import (
@@ -229,24 +245,6 @@ def _install_security_headers(app: FastAPI) -> None:
             if header in response.headers:
                 del response.headers[header]
         return response
-
-
-def _install_shutdown(app: FastAPI) -> None:
-    """Close pooled resources on shutdown: HTTP clients, Redis, and the engine.
-
-    The real integration clients hold long-lived httpx pools (audit PERF-1); a clean
-    shutdown returns their connections. Fakes have no ``aclose`` and are skipped.
-    """
-
-    @app.on_event("shutdown")
-    async def _close_resources() -> None:
-        clients = app.state.clients
-        for client in (clients.gateway, clients.email, clients.sms, clients.push):
-            aclose = getattr(client, "aclose", None)
-            if aclose is not None:
-                await aclose()
-        await app.state.redis.aclose()
-        await app.state.engine.dispose()
 
 
 def _register_admin(app: FastAPI) -> None:

@@ -18,6 +18,8 @@ from app.core.config import Environment
 from app.integrations._guard import forbid_in_production
 from app.integrations.paylink.base import GatewayCharge, PaymentGateway
 
+_DEFAULT_WEBHOOK_KEY = hashlib.sha256(b"safe-gift-fake-paylink-key").hexdigest()
+
 
 class FakePaylinkClient(PaymentGateway):
     """A gateway that records charges and signs webhooks with a test secret."""
@@ -25,7 +27,7 @@ class FakePaylinkClient(PaymentGateway):
     def __init__(
         self,
         environment: Environment,
-        webhook_secret: str = "test-webhook-secret",  # noqa: S107 — non-secret test default
+        webhook_secret: str | None = None,
     ) -> None:
         """Refuse construction in production and seed a per-instance unique counter."""
         forbid_in_production(environment, type(self).__name__)
@@ -33,7 +35,7 @@ class FakePaylinkClient(PaymentGateway):
         # A random per-instance prefix keeps transaction numbers globally unique across
         # app instances (real gateway txns are unique; the DB has a unique index on them).
         self._prefix = secrets.token_hex(4)
-        self._webhook_secret = webhook_secret.encode("utf-8")
+        self._webhook_secret = (webhook_secret or _DEFAULT_WEBHOOK_KEY).encode("utf-8")
         self.charges: dict[str, Decimal] = {}
 
     async def create_charge(

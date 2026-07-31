@@ -152,7 +152,8 @@ class FulfillmentService:
         invoice = await self._invoices.get_active_for_order(order.id)
         if invoice is None or invoice.status is not InvoiceStatus.PAID:
             raise ConflictError("The order has no paid invoice to settle.")
-        assert order.courier_id is not None
+        if order.courier_id is None:
+            raise ConflictError("The order has no assigned courier.")
         courier_wallet = await self._wallets.get_by_user(order.courier_id)
         if courier_wallet is None:  # pragma: no cover - courier always has a wallet
             raise NotFoundError("Courier wallet not found.")
@@ -255,7 +256,8 @@ class FulfillmentService:
         courier_amount: Decimal | None,
     ) -> OrderStatus:
         """Move escrow for a dispute outcome and return the order's target status."""
-        assert order.courier_id is not None
+        if order.courier_id is None:
+            raise ConflictError("The order has no assigned courier.")
         courier_wallet = await self._wallets.get_by_user(order.courier_id)
         customer_wallet = await self._wallets.get_by_user(order.customer_id)
         if courier_wallet is None or customer_wallet is None:  # pragma: no cover

@@ -35,3 +35,23 @@ Return the caller's ledger entries, newest first (keyset paged). **Auth**: Beare
 
 ## POST /api/wallets/topup
 Start a wallet top-up (gateway-funded). See `docs/endpoints/payments.md`.
+
+## POST /api/wallets/withdrawals
+Create a courier payout request. **Auth**: Bearer JWT. **Role**: COURIER.
+
+Send a stable `Idempotency-Key` header (1–128 characters) on every attempt. A retry with
+the same key returns the original request and does not reserve the funds twice.
+
+```json
+// request
+{ "amount": "250.00", "iban": "SA0380000000608010167519" }
+// response 201 (the full IBAN is never returned)
+{ "id": "uuid", "amount": "250.00", "iban_last4": "7519", "status": "REQUESTED", "rejection_reason": null }
+```
+
+The amount must be within `MIN_WITHDRAWAL_AMOUNT` and `MAX_WITHDRAWAL_AMOUNT`. The IBAN
+is normalized as a 24-character Saudi IBAN, encrypted immediately, and the amount is
+reserved in `held_balance` until an admin pays or rejects the request.
+
+Errors: `403 FORBIDDEN` for non-couriers, `409 INSUFFICIENT_FUNDS`, and
+`422 VALIDATION_ERROR` for an out-of-range amount or invalid request body.

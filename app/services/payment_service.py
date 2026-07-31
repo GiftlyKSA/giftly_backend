@@ -305,7 +305,8 @@ class PaymentService:
         )
 
     async def _settle_invoice(self, intent: PaymentIntent) -> None:
-        assert intent.reference_invoice_id is not None
+        if intent.reference_invoice_id is None:
+            raise ConflictError("The payment intent has no invoice reference.")
         invoice = await self._invoices.lock(intent.reference_invoice_id)
         if invoice is None:  # pragma: no cover - FK guarantees the invoice exists
             raise NotFoundError("Invoice not found.")

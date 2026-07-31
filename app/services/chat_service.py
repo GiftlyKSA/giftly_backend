@@ -95,7 +95,7 @@ class ChatService:
     async def send_message(
         self, *, conversation_id: uuid.UUID, sender_id: uuid.UUID, text: str
     ) -> ChatMessage:
-        """Encrypt and append a message, then publish it for live delivery.
+        """Encrypt and append a message for its caller to commit.
 
         Raises:
             NotFoundError: The sender does not participate in the conversation.
@@ -110,9 +110,11 @@ class ChatService:
             preview_encrypted=preview,
             sender_is_customer=sender_id == conversation.customer_id,
         )
-        dto = self._to_dto(message, text)
-        await self._publish(conversation_id, dto)
-        return dto
+        return self._to_dto(message, text)
+
+    async def publish_message(self, message: ChatMessage) -> None:
+        """Publish a committed message for live delivery."""
+        await self._publish(uuid.UUID(message.conversation_id), message)
 
     async def list_messages(
         self,

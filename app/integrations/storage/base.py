@@ -26,9 +26,9 @@ class StorageClient(ABC):
 
     @abstractmethod
     async def create_upload_url(
-        self, *, storage_key: str, content_type: str, max_bytes: int, ttl_seconds: int
+        self, *, storage_key: str, content_type: str, byte_size: int, ttl_seconds: int
     ) -> str:
-        """Return a pre-signed PUT URL pinned to a content-type and size range."""
+        """Return a pre-signed PUT URL pinned to a content-type and exact size."""
 
     @abstractmethod
     async def head_object(self, storage_key: str) -> ObjectHead | None:

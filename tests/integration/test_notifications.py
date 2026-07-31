@@ -113,3 +113,21 @@ async def test_notify_no_devices_is_noop(db_session: AsyncSession) -> None:
     user = await _user(db_session, UserRole.CUSTOMER)
     assert await svc.notify_user(user_id=user.id, title="t", body="b") == 0
     assert push.sent == []
+
+
+async def test_notifications_chunk_provider_batches(db_session: AsyncSession) -> None:
+    push = FakePushClient(Environment.TEST)
+    repo = DeviceTokenRepository(db_session)
+    svc = NotificationService(devices=repo, push=push)
+    user = await _user(db_session, UserRole.CUSTOMER)
+    for index in range(501):
+        await repo.register(
+            user_id=user.id,
+            token=f"token-{index}",
+            device_os=DeviceOs.IOS,
+        )
+
+    count = await svc.notify_user(user_id=user.id, title="Update", body="Open the app.")
+
+    assert count == 501
+    assert [len(message.tokens) for message in push.sent] == [500, 1]

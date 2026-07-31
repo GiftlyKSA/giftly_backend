@@ -45,6 +45,18 @@ class _BoomRedis:
         raise RuntimeError("redis down")
 
 
+class _GuardRedis:
+    """A Redis script stand-in for the combined WS guard."""
+
+    def __init__(self, result: int) -> None:
+        self.result = result
+        self.args: tuple[object, ...] = ()
+
+    async def eval(self, *args: object) -> int:
+        self.args = args
+        return self.result
+
+
 async def test_rate_limiter_allows_then_blocks() -> None:
     settings = _settings()
     redis = build_redis(settings)
@@ -74,6 +86,24 @@ async def test_rate_limiter_fails_open_on_backend_error() -> None:
     # A Redis outage must never take the API down: the request is allowed through.
     assert decision.allowed is True
     assert decision.retry_after_seconds == 0
+
+
+async def test_guarded_rate_limiter_checks_ban_and_window_in_one_round_trip() -> None:
+    redis = _GuardRedis(-1)
+    limiter = RateLimiter(redis, max_requests=3, window_seconds=60)  # type: ignore[arg-type]
+    decision = await limiter.check_guarded("ws:user", blocked_key="auth:banned:user")
+
+    assert decision.blocked is True
+    assert decision.allowed is False
+    assert redis.args[1:4] == (2, "ratelimit:ws:user", "auth:banned:user")
+
+
+async def test_guarded_rate_limiter_fails_closed_on_backend_error() -> None:
+    limiter = RateLimiter(_BoomRedis(), max_requests=1, window_seconds=60)  # type: ignore[arg-type]
+    decision = await limiter.check_guarded("ws:user", blocked_key="auth:banned:user")
+
+    assert decision.blocked is True
+    assert decision.allowed is False
 
 
 async def test_rate_limit_middleware_returns_429_with_retry_after() -> None:

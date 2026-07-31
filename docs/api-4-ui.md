@@ -81,10 +81,10 @@ messages (default 30/min) — excess frames are silently dropped.
 
 ### Idempotency
 
-Money-moving calls (`/wallets/topup`, `/invoices/{id}/pay`) are safe to retry: the
-server de-duplicates internally by payment-intent/invoice, so a retry never
-double-charges. As a convention you may also send an `Idempotency-Key: <uuid>` header;
-it is accepted but the server's internal de-dup is what guarantees safety.
+Money-moving calls (`/wallets/topup`, `/invoices/{id}/pay`) are safe to retry because
+the server de-duplicates by payment intent/invoice. A withdrawal request additionally
+requires `Idempotency-Key: <stable 1–128 character value>`; reuse the same value for
+every retry so the funds hold is created exactly once.
 
 ---
 
@@ -144,6 +144,7 @@ part of the mobile app and are omitted here.
 |  | PATCH `/api/users/me` | Bearer | Any | Update my profile |
 | Wallet | GET `/api/wallets/me` | Bearer | Any | My wallet balances |
 |  | POST `/api/wallets/topup` | Bearer | Any | Start a wallet top-up (returns a pay URL) |
+|  | POST `/api/wallets/withdrawals` | Bearer | K | Request a courier payout |
 |  | GET `/api/wallets/me/transactions` | Bearer | Any | My ledger history (paged) |
 | Media | POST `/api/media/upload-urls` | Bearer | Any | Get a pre-signed S3 upload URL |
 |  | POST `/api/media/confirm` | Bearer | Any | Confirm an uploaded image is valid |
@@ -346,6 +347,21 @@ web view / browser; the wallet is credited when the gateway confirms (asynchrono
 After the user returns from `payment_url`, re-fetch `/api/wallets/me` (the credit lands
 via webhook; poll or refresh on focus). Errors: `422 VALIDATION_ERROR` (amount out of
 range), `404 NOT_FOUND` (no wallet).
+
+### POST `/api/wallets/withdrawals` (courier)
+**Auth:** Bearer **COURIER**. **Header:** `Idempotency-Key` (required). **Returns:** 201.
+
+```json
+// request
+{ "amount": "250.00", "iban": "SA0380000000608010167519" }
+// response
+{ "id": "…", "amount": "250.00", "iban_last4": "7519", "status": "REQUESTED", "rejection_reason": null }
+```
+
+The server normalizes and encrypts the Saudi IBAN and moves the amount from `available`
+to `held_balance`. A rejection releases it; a paid withdrawal posts a ledger debit.
+Never persist or log the plaintext IBAN in the client. Errors include
+`409 INSUFFICIENT_FUNDS` and `422 VALIDATION_ERROR`.
 
 ### GET `/api/wallets/me/transactions`
 **Auth:** Bearer. **Returns:** 200. Paged (`?cursor=&limit=`).
@@ -671,7 +687,8 @@ Bytes **never** pass through the API. Flow:
 
 ### PUT to `upload_url`
 Not an API call — upload directly to S3: `PUT <upload_url>` with the raw bytes and the
-**same** `Content-Type` you declared. Do this within `expires_in` seconds.
+**same** `Content-Type` and exact `Content-Length` you declared. Do this within
+`expires_in` seconds.
 
 ### POST `/api/media/confirm`
 **Auth:** Bearer. **Returns:** 200. Validates the object exists and is a real image

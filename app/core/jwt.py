@@ -35,17 +35,21 @@ class AccessClaims:
 
 def _signing_key(settings: Settings) -> str:
     if settings.JWT_ALGORITHM == "HS256":
-        assert settings.JWT_SECRET is not None
+        if settings.JWT_SECRET is None:
+            raise JwtError("JWT signing secret is not configured.")
         return settings.JWT_SECRET.get_secret_value()
-    assert settings.JWT_PRIVATE_KEY is not None
+    if settings.JWT_PRIVATE_KEY is None:
+        raise JwtError("JWT private key is not configured.")
     return settings.JWT_PRIVATE_KEY.get_secret_value()
 
 
 def _verify_key(settings: Settings) -> str:
     if settings.JWT_ALGORITHM == "HS256":
-        assert settings.JWT_SECRET is not None
+        if settings.JWT_SECRET is None:
+            raise JwtError("JWT verification secret is not configured.")
         return settings.JWT_SECRET.get_secret_value()
-    assert settings.JWT_PUBLIC_KEY is not None
+    if settings.JWT_PUBLIC_KEY is None:
+        raise JwtError("JWT public key is not configured.")
     return settings.JWT_PUBLIC_KEY.get_secret_value()
 
 

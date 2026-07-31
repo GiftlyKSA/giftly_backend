@@ -89,7 +89,6 @@ class Settings(BaseSettings):
     SMS_PROVIDER_KEY: SecretStr | None = None
     SUPABASE_URL: str | None = None
     SUPABASE_SERVICE_KEY: SecretStr | None = None
-    FCM_CREDENTIALS: SecretStr | None = None
 
     # Admin dashboard
     ADMIN_SESSION_SECRET: SecretStr | None = None
@@ -128,6 +127,7 @@ class Settings(BaseSettings):
     MIN_TOPUP_AMOUNT: Decimal = Decimal("100.00")
     MAX_TOPUP_AMOUNT: Decimal = Decimal("20000.00")
     MIN_WITHDRAWAL_AMOUNT: Decimal = Decimal("50.00")
+    MAX_WITHDRAWAL_AMOUNT: Decimal = Decimal("20000.00")
     MAX_DELIVERY_RADIUS_METERS: int = 200
     AUTO_APPROVE_HOURS: int = 72
     PAYMENT_EXPIRY_HOURS: int = 48
@@ -205,6 +205,10 @@ class Settings(BaseSettings):
             value: Decimal = getattr(self, name)
             if not (Decimal(0) <= value <= Decimal(1)):
                 raise ValueError(f"{name} must be within [0, 1].")
+        if self.MIN_WITHDRAWAL_AMOUNT < Decimal("50.00"):
+            raise ValueError("MIN_WITHDRAWAL_AMOUNT must be at least 50.00.")
+        if self.MAX_WITHDRAWAL_AMOUNT < self.MIN_WITHDRAWAL_AMOUNT:
+            raise ValueError("MAX_WITHDRAWAL_AMOUNT must be at least MIN_WITHDRAWAL_AMOUNT.")
 
     def _validate_admin(self) -> None:
         if self.ADMIN_DASHBOARD_ENABLED:
@@ -222,22 +226,32 @@ class Settings(BaseSettings):
             raise ValueError("CORS_ALLOWED_ORIGINS must be set in production.")
         if "*" in self.cors_origins:
             raise ValueError("CORS_ALLOWED_ORIGINS must not contain a wildcard in production.")
-        for name in (
+        self._require_production_fields(
             "PAYLINK_API_ID",
             "PAYLINK_SECRET_KEY",
             "PAYLINK_WEBHOOK_SECRET",
             "PAYLINK_ALLOWED_IPS",
             "PAYLINK_CALLBACK_URL",
-        ):
-            if getattr(self, name) in (None, ""):
-                raise ValueError(f"{name} is required in production.")
-        for name in (
+            "AWS_REGION",
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "S3_BUCKET_NAME",
+            "CLOUDFRONT_DOMAIN",
+            "CLOUDFRONT_KEY_PAIR_ID",
+            "CLOUDFRONT_PRIVATE_KEY",
+            "SMS_PROVIDER_KEY",
+            "SUPABASE_URL",
+            "SUPABASE_SERVICE_KEY",
             "SNDR_API_KEY",
             "SNDR_BASE_URL",
             "SNDR_FROM_EMAIL",
             "SNDR_FROM_NAME",
             "SNDR_INVOICE_PAID_TEMPLATE_KEY",
-        ):
+        )
+
+    def _require_production_fields(self, *names: str) -> None:
+        """Reject an empty production integration setting."""
+        for name in names:
             if getattr(self, name) in (None, ""):
                 raise ValueError(f"{name} is required in production.")
 

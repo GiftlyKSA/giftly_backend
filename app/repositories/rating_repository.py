@@ -61,4 +61,4 @@ class RatingRepository:
         ).first()
         if row is None or row[1] == 0:
             return Decimal("0.00"), 0
-        return Decimal(str(row[0])).quantize(Decimal("0.01")), int(row[1])
+        return round(Decimal(str(row[0])), 2), int(row[1])

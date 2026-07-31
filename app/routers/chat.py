@@ -123,9 +123,12 @@ async def send_message(
     actor: Annotated[Actor, Depends(_Participant)],
 ) -> MessageResponse:
     """Send a text message; participants receive it live over the WebSocket."""
-    dto = await _service(request, db).send_message(
+    service = _service(request, db)
+    dto = await service.send_message(
         conversation_id=conversation_id, sender_id=actor.id, text=body.text
     )
+    # A live event must never race ahead of the durable row it announces.
+    await db.commit()
     # Best-effort push to the recipient — the body carries NO message text (Restricted).
     conversation = await ChatRepository(db).get_for_actor(conversation_id, actor.id)
     if conversation is not None:
@@ -141,6 +144,7 @@ async def send_message(
             title="New message",
             body="You have a new message about your order.",
         )
+    await service.publish_message(dto)
     return _message(dto)
 
 
@@ -229,19 +233,24 @@ async def _pump_socket_to_chat(
         raw = await websocket.receive_text()
         if len(raw.encode("utf-8")) > settings.WS_MAX_FRAME_BYTES:
             continue  # oversized frame: dropped before any decrypt/persist work
-        if await redis.get(f"auth:banned:{actor.id}"):
+        decision = await limiter.check_guarded(
+            f"ws:{actor.id}", blocked_key=f"auth:banned:{actor.id}"
+        )
+        if decision.blocked:
             await websocket.close(code=4401)  # banned mid-connection
             return
-        if not (await limiter.check(f"ws:{actor.id}")).allowed:
+        if not decision.allowed:
             continue  # over the per-user message ceiling: dropped
         text = _extract_text(raw)
         if not text:
             continue
         async with factory() as session:  # type: ignore[operator]
             service = ChatService(chat=ChatRepository(session), redis=redis, settings=settings)
-            await service.send_message(
+            dto = await service.send_message(
                 conversation_id=conversation_id, sender_id=actor.id, text=text
             )
+            # Commit before any external side effect or live event can expose the row.
+            await session.commit()
             # Same best-effort push as the REST path; NO message text in the body.
             await NotificationService(
                 devices=DeviceTokenRepository(session), push=websocket.app.state.clients.push
@@ -250,7 +259,7 @@ async def _pump_socket_to_chat(
                 title="New message",
                 body="You have a new message about your order.",
             )
-            await session.commit()
+            await service.publish_message(dto)
 
 
 def _extract_text(raw: str) -> str:

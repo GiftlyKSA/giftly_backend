@@ -3,11 +3,10 @@
 SAFE-GIFT is a peer-to-peer custom-gifting marketplace backend. Customers post gift
 requests; verified couriers invoice and deliver; money moves through an escrow ledger.
 
-All 14 build phases are complete, and every actionable finding from the self-audit in
-`docs/audit/` has been fixed (re-audited 2026-07-20). When picking up work here, read
-the audit's README first — it lists the accepted trade-offs (fail-open API limiter, WS
-query-param token, `statement_cache_size=0`) that must not be "fixed" casually — and
-update the audit whenever a finding changes state or a new risk is introduced.
+All 14 build phases are complete. The codebase was re-audited on 2026-07-31; remediated
+findings, remaining production blockers, and accepted trade-offs are tracked in
+`docs/audit/README.md`. Read it before changing security, money, storage, or integration
+behavior, and update the audit whenever a finding changes state or a new risk appears.
 
 ## THE HARD RULES
 

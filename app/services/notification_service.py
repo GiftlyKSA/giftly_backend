@@ -14,6 +14,7 @@ from app.integrations.push.base import PushClient
 from app.repositories.device_token_repository import DeviceTokenRepository
 
 _logger = logging.getLogger("app.services.notification")
+_PUSH_BATCH_SIZE = 500
 
 
 class NotificationService:
@@ -39,7 +40,9 @@ class NotificationService:
     async def _send(self, tokens: list[str], title: str, body: str) -> None:
         if not tokens:
             return
-        try:
-            await self._push.send_push(tokens, title, body)
-        except Exception:  # noqa: BLE001 - a push failure must never break the caller
-            _logger.exception("push notification failed for %d token(s)", len(tokens))
+        for start in range(0, len(tokens), _PUSH_BATCH_SIZE):
+            batch = tokens[start : start + _PUSH_BATCH_SIZE]
+            try:
+                await self._push.send_push(batch, title, body)
+            except Exception:  # noqa: BLE001 - a push failure must never break the caller
+                _logger.exception("push notification failed for %d token(s)", len(batch))

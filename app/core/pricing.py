@@ -183,12 +183,14 @@ def _compute_discount(discountable: Decimal, promo: PricingPromo | None) -> Deci
     if promo is None:
         return ZERO
     if promo.discount_type is PromoDiscountKind.PERCENT:
-        assert promo.percent_value is not None
+        if promo.percent_value is None:
+            raise PricingIntegrityError("A percentage promo needs percent_value.")
         d = quantize_money(discountable * promo.percent_value / Decimal(100))
         if promo.max_discount_amount is not None:
             d = min(d, promo.max_discount_amount)
     else:
-        assert promo.fixed_amount is not None
+        if promo.fixed_amount is None:
+            raise PricingIntegrityError("A fixed promo needs fixed_amount.")
         d = promo.fixed_amount
     # A discount can never exceed the base it is applied to.
     return min(d, discountable)

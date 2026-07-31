@@ -824,11 +824,19 @@ class Withdrawal(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UUID(as_uuid=True), ForeignKey("users.id"), nullable=True
     )
     rejection_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    idempotency_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     __table_args__ = (
         CheckConstraint("amount >= 50.00", name="chk_withdrawal_min"),
         Index("idx_withdrawals_courier_status", "courier_id", "status"),
         Index("idx_withdrawals_status_created", "status", "created_at"),
+        Index(
+            "uq_withdrawals_courier_idempotency",
+            "courier_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=text("idempotency_key IS NOT NULL"),
+        ),
     )
 
 

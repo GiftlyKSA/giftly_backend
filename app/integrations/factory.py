@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from pydantic import SecretStr
+
 from app.core.config import Environment, Settings
 from app.integrations.email.base import EmailClient
 from app.integrations.email.fake import FakeEmailClient
@@ -55,18 +57,14 @@ def build_clients(settings: Settings) -> Clients:
 
 
 def _build_production_clients(settings: Settings) -> Clients:
-    assert settings.PAYLINK_API_ID is not None
-    assert settings.PAYLINK_SECRET_KEY is not None
-    assert settings.PAYLINK_WEBHOOK_SECRET is not None
-    assert settings.SNDR_API_KEY is not None
     gateway = RealPaylinkClient(
-        api_id=settings.PAYLINK_API_ID.get_secret_value(),
-        secret_key=settings.PAYLINK_SECRET_KEY.get_secret_value(),
-        webhook_secret=settings.PAYLINK_WEBHOOK_SECRET.get_secret_value(),
+        api_id=_required_secret(settings.PAYLINK_API_ID, "PAYLINK_API_ID"),
+        secret_key=_required_secret(settings.PAYLINK_SECRET_KEY, "PAYLINK_SECRET_KEY"),
+        webhook_secret=_required_secret(settings.PAYLINK_WEBHOOK_SECRET, "PAYLINK_WEBHOOK_SECRET"),
     )
     email = SndrEmailClient(
         base_url=settings.SNDR_BASE_URL or "",
-        api_key=settings.SNDR_API_KEY.get_secret_value(),
+        api_key=_required_secret(settings.SNDR_API_KEY, "SNDR_API_KEY"),
         from_email=settings.SNDR_FROM_EMAIL or "",
         from_name=settings.SNDR_FROM_NAME or "",
     )
@@ -87,9 +85,22 @@ def _build_production_clients(settings: Settings) -> Clients:
     storage = S3StorageClient(
         bucket=settings.S3_BUCKET_NAME or "",
         region=settings.AWS_REGION or "",
+        access_key_id=_required_secret(settings.AWS_ACCESS_KEY_ID, "AWS_ACCESS_KEY_ID"),
+        secret_access_key=_required_secret(settings.AWS_SECRET_ACCESS_KEY, "AWS_SECRET_ACCESS_KEY"),
         cloudfront_domain=settings.CLOUDFRONT_DOMAIN or "",
+        cloudfront_key_pair_id=settings.CLOUDFRONT_KEY_PAIR_ID or "",
+        cloudfront_private_key=_required_secret(
+            settings.CLOUDFRONT_PRIVATE_KEY, "CLOUDFRONT_PRIVATE_KEY"
+        ),
     )
     return Clients(gateway=gateway, email=email, sms=sms, push=push, storage=storage)
+
+
+def _required_secret(value: SecretStr | None, name: str) -> str:
+    """Return a production secret or fail closed if boot validation regresses."""
+    if value is None:
+        raise RuntimeError(f"{name} is required in production.")
+    return value.get_secret_value()
 
 
 def _build_fake_clients(environment: Environment) -> Clients:

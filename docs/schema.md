@@ -22,6 +22,9 @@
 | conversations | messages | 1–0..*, cascade, append-only |
 | wallets | transactions | 1–0..*, **restrict** (ledger never orphaned/cascaded) |
 
+Withdrawals belong to a courier and wallet. Their amount is held from request until
+rejection or payment; a courier-scoped unique idempotency key prevents duplicate holds.
+
 ## System wallets (seeded by migration)
 
 `SYSTEM_ESCROW`, `SYSTEM_REVENUE`, `SYSTEM_GATEWAY`, `SYSTEM_TAX_PAYABLE` — one each,
@@ -37,6 +40,10 @@ negative and are excluded from the non-negative balance CHECK.
 - `promos`: `code = upper(btrim(code))`; usage bounds; value-by-type.
 - `orders`: delivery date within [today, +180d]; courier required after assignment.
 - `wallets`: user/system pairing; non-negative balance except gateway/revenue.
+
+The withdrawal lifecycle is serialized as `REQUESTED → APPROVED → PAID`, or
+`REQUESTED|APPROVED → REJECTED`. Paid entries debit the courier wallet and credit
+`SYSTEM_GATEWAY` in one balanced group.
 
 See `app/models/tables.py` for the authoritative column, constraint, and index list, and
 the baseline Alembic migration for the DDL and triggers.

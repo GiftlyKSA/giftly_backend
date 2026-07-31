@@ -382,6 +382,38 @@ class MoneyService:
         wallet.version += 1
         await self._wallets.flush()
 
+    async def pay_withdrawal(
+        self,
+        *,
+        courier_wallet_id: uuid.UUID,
+        amount: Decimal,
+        withdrawal_id: uuid.UUID,
+    ) -> bool:
+        """Debit a held courier payout against the external gateway account."""
+        amount = quantize_money(amount)
+        gateway = await self._wallets.get_system(WalletType.SYSTEM_GATEWAY)
+        posted = await self.post_group(
+            correlation_id=uuid.uuid4(),
+            legs=[
+                Leg(
+                    wallet_id=courier_wallet_id,
+                    amount=-amount,
+                    txn_type=TransactionType.WITHDRAWAL,
+                    idempotency_key=f"withdrawal:{withdrawal_id}:paid",
+                    description=f"Courier withdrawal {withdrawal_id}",
+                ),
+                Leg(
+                    wallet_id=gateway.id,
+                    amount=amount,
+                    txn_type=TransactionType.WITHDRAWAL,
+                    description=f"Courier withdrawal {withdrawal_id}",
+                ),
+            ],
+        )
+        if posted:
+            await self.release_hold(wallet_id=courier_wallet_id, amount=amount)
+        return posted
+
     async def fund_escrow_for_invoice(
         self,
         *,

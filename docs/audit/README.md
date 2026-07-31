@@ -1,66 +1,59 @@
-# SAFE-GIFT backend — code audit (current state, 2026-07-21)
+# SAFE-GIFT backend — full code audit (2026-07-31)
 
-A living self-audit of the completed Phase 1–14 codebase. This document tracks the
-**currently open** findings and the deliberately accepted trade-offs. The initial audit
-(commit `b952838`) raised 17 findings; a remediation pass (commit `ceb44ab`) closed all
-17 — that history lives in git, and is not re-listed here. This revision is a fresh
-full pass over the remediated tree, and records what a clean read of the *current* code
-turns up.
+This folder is a fresh audit of the current tree after remediation. It replaces the
+2026-07-21 reports. Findings were verified against code, migrations, generated OpenAPI,
+and real PostgreSQL/PostGIS + Redis tests; historical findings are not carried forward
+unless they still apply.
 
-## Scope and method
+## Scope and evidence
 
-- **Read in full**: `core/` (money, pricing, crypto, security, jwt, locks, db, config,
-  middleware, ratelimit, deps), the money/payment/auth/fulfillment services, the webhook
-  route, the admin session/CSRF wiring, the media service, the chat WebSocket, all
-  scheduled workers, and the real integration clients — with fresh attention to the code
-  the remediation pass changed.
-- **Swept by pattern**: raw/f-string SQL, `float()` in money paths, FastAPI imports in
-  services (layering), ownership-in-query usage, pagination caps, index coverage,
-  cookie flags, secret handling, dev/fake gating, and dead/half-wired feature surface.
-- Backed by the live gates: ruff + ruff format, mypy `--strict`, and the test suite at
-  ~88 % coverage (all green).
+- Read and traced every module under `app/core`, every service/repository/router, all
+  workers and real integration adapters, ORM constraints, Alembic revisions, Docker
+  configuration, CI, and the public docs.
+- Swept for unsafe SQL construction, money floats/quantization, missing ownership
+  filters, secret leakage, broad exception handling, unbounded queries, dead config,
+  state transitions, idempotency, external effects before commit, and fake-production
+  interlock gaps.
+- Gates: Ruff and format clean; strict mypy clean; Bandit clean; `pip-audit --strict`
+  reports no known vulnerabilities; Alembic reports no application-model drift;
+  Docker Compose config validates.
+- 230 tests passed in the full four-worker run. Coverage measured **87.82%**, above the
+  85% CI gate.
 
-## Files
+## Remediation completed in this pass
 
-| File | Covers |
+| Area | Result |
 | --- | --- |
-| [01-security.md](01-security.md) | AuthN/AuthZ, crypto, webhooks, rate limiting, admin surface, OWASP notes |
-| [02-money-integrity.md](02-money-integrity.md) | Ledger, pricing, escrow, holds, reconciliation, payout exit |
-| [03-logic-and-correctness.md](03-logic-and-correctness.md) | State machines, races, workers, chat/WS, feature completeness |
-| [04-performance.md](04-performance.md) | HTTP clients, middleware stack, query scaling, unbounded growth |
-| [05-guidelines-compliance.md](05-guidelines-compliance.md) | CLAUDE.md hard rules, rule by rule |
-
-## Severity legend
-
-- **High** — exploitable or money-affecting; fix before production traffic.
-- **Medium** — real weakness or scaling/completeness defect; fix soon, not an emergency.
-- **Low** — defence-in-depth gap or papercut; batch into normal work.
-- **Info** — deliberate, documented trade-off worth re-confirming periodically.
+| Trusted proxy IPs | `FORWARDED_ALLOW_IPS` is explicit in env/Compose; server-level trust remains CIDR-scoped. |
+| Withdrawals | Complete request → approve/reject → paid flow; encrypted Saudi IBAN, held funds, row locks, audit rows, idempotency, and balanced ledger settlement. |
+| WebSocket guards | Ban check and rate limit now share one Redis Lua round trip and fail closed. |
+| Application lifecycle | Deprecated shutdown event replaced with FastAPI lifespan cleanup. |
+| Chat durability | Message commits and recipient notification finish before Redis publishes the live event. |
+| Private media | Upload URL signs exact length and content type; CloudFront read URLs are RSA/SHA-256 signed; production storage config is fail-closed. |
+| Push fanout | Provider calls are bounded to 500 tokens per batch. |
+| Runtime guards | Optimization-sensitive asserts replaced with explicit errors. |
+| Migration checks | Extension-owned PostGIS tables no longer pollute Alembic drift checks. |
 
 ## Open findings
 
-| ID | Sev | Summary |
+| ID | Severity | Summary |
 | --- | --- | --- |
-| NF-1 | Medium | No proxy/forwarded-header handling — peer IP powers the webhook allowlist, rate limiting, and audit IPs |
-| NF-2 | Medium | Withdrawals are half-wired: funds enter courier wallets but no code path pays them out |
-| NF-3 | Low | Each inbound WS frame costs two Redis round trips (ban check + throttle) |
-| NF-4 | Low | Live-token ban revocation depends on a best-effort Redis flag write |
-| NF-5 | Low | App shutdown uses the deprecated `on_event` instead of a lifespan handler |
-| NF-6 | Info | One cross-test flake (`test_create_rejects_second_active_invoice`) under full-suite runs |
+| OPEN-1 | High | Paylink, sndr, SMS, and push adapters still contain vendor-contract placeholders and need sandbox/live contract tests before production. |
+| OPEN-2 | Medium | Private media read signing exists, but no ownership-checked endpoint/response currently delivers signed read URLs to clients. |
+| OPEN-3 | Medium | `held_balance` mutations are locked, but reconciliation does not reconstruct holds from pending invoices and withdrawals. |
+| OPEN-4 | Low | Key rotation and wallet reconciliation materialize full tables; acceptable now, but should page/stream before large scale. |
+| OPEN-5 | Low | Live access-token ban revocation is Redis-backed; Redis data loss can restore a banned token until its ≤30-minute JWT expiry. |
+| OPEN-6 | Info | Starlette emits a TestClient/httpx deprecation warning; application lifespan usage itself is current. |
 
-## Accepted trade-offs (re-confirmed this pass)
+## Accepted trade-offs
 
-| ID | Summary |
-| --- | --- |
-| AT-1 | API rate limiter fails **open** on a Redis error (the OTP limiter fails closed) |
-| AT-2 | WebSocket access token travels in the `?token=` query string |
-| AT-3 | `statement_cache_size=0` for PgBouncer transaction-mode safety |
-| AT-4 | `/api/health/ready` is exempt from throttling by design (keep it behind the LB) |
-| AT-5 | Services/repositories are constructed per request (session-scoped correctness) |
-| AT-6 | `admin_sessions` / `audit_log` are keep-forever (audit trail) |
-| AT-7 | Real push client token-list chunking is unverifiable until FCM credentials land |
+- The ordinary HTTP rate limiter fails open on Redis failure; OTP and guarded WebSocket
+  paths fail closed.
+- Browser WebSocket authentication uses `?token=`; proxy/access logs must redact query
+  strings until single-use WS tickets are introduced.
+- `statement_cache_size=0` remains enabled for PgBouncer transaction-mode safety.
+- Health probes are not throttled and must stay behind the load balancer.
+- Admin/audit history has no automatic retention policy.
 
-None of the open findings is a running-code bug. NF-1 and NF-2 are the two that warrant
-a decision: NF-1 is closed by a one-line deploy flag (documented in the README and under
-NF-1), and NF-2 is a product-scope call — implement the payout flow, or explicitly defer
-it and guard the now-dead `MIN_WITHDRAWAL_AMOUNT`/withdrawal surface.
+OPEN-1 and OPEN-2 are production launch blockers. OPEN-3 should be resolved before
+withdrawal/payment volume makes manual hold investigation impractical.

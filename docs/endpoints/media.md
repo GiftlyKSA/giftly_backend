@@ -1,7 +1,8 @@
 # Media
 
 Zero-proxy uploads: the API never accepts bytes. It issues a pre-signed PUT URL with a
-SERVER-generated key; the client PUTs straight to S3, then confirms the key.
+SERVER-generated key; the client PUTs straight to S3, then confirms the key. The URL
+signs both the declared content type and exact content length.
 
 ## POST /api/media/upload-urls
 **Auth**: Bearer JWT.

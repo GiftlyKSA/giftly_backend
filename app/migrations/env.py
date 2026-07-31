@@ -24,16 +24,14 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
+
 # PostGIS manages these tables/indexes itself; exclude them from autogenerate so a
 # diff never proposes dropping spatial_ref_sys (SPEC SECTION 4.8 — clean revisions).
-_POSTGIS_TABLES = {"spatial_ref_sys"}
-
-
 def _include_object(
     obj: object, name: str | None, type_: str, reflected: bool, compare_to: object
 ) -> bool:
     """Exclude PostGIS-managed objects from autogenerate comparison."""
-    if type_ == "table" and name in _POSTGIS_TABLES:
+    if type_ == "table" and reflected and name not in target_metadata.tables:
         return False
     return True
 

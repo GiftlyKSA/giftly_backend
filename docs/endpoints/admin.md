@@ -58,6 +58,20 @@ withdrawal processing move escrow funds and are therefore performed through the
 double-entry ledger service (Phase 4), not the dashboard; those pages are read-only
 here. Every mutating action writes an `audit_logs` row (actor, action, entity, ip).
 
+## Withdrawal JSON actions
+
+These ADMIN-JWT endpoints serialize each transition with a database row lock and post
+paid withdrawals through the double-entry ledger:
+
+| Route | Transition |
+| --- | --- |
+| `POST /api/admin/withdrawals/{id}/approve` | `REQUESTED → APPROVED`; retains the hold |
+| `POST /api/admin/withdrawals/{id}/reject` | `REQUESTED|APPROVED → REJECTED`; releases the hold; body `{ "reason": "..." }` |
+| `POST /api/admin/withdrawals/{id}/paid` | `APPROVED → PAID`; courier wallet → `SYSTEM_GATEWAY` |
+
+Repeating a completed action is idempotent. Invalid transitions return
+`409 INVALID_STATE_TRANSITION`; unknown IDs return `404 NOT_FOUND`.
+
 ## Hardening
 
 Jinja autoescape is on everywhere (never `|safe` on user text). A restrictive CSP is

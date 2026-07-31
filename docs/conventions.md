@@ -30,8 +30,11 @@ Cross-cutting rules that every endpoint and every screen relies on.
 
 ## Idempotency
 
-- Money-moving endpoints **require** an `Idempotency-Key` header (a client-generated
-  UUID). Retrying with the same key returns the original result and never double-charges.
+- `POST /api/wallets/withdrawals` requires an `Idempotency-Key` header (1–128
+  characters). Retrying with the same key returns the original request and never
+  duplicates its funds hold.
+- Top-ups, invoice payments, settlements, and admin withdrawal actions use stable
+  resource/payment identifiers internally, so retrying cannot post a second ledger group.
 
 ## Error envelope
 
