@@ -5,13 +5,15 @@
 <section class="card">
   <table>
     <tr><td>City</td><td>{{ profile.city_of_residence }}</td></tr>
+    <tr><td>Phone</td><td>{{ user.phone if user else "—" }}</td></tr>
+    <tr><td>Full name</td><td>{{ user.full_name if user and user.full_name else "—" }}</td></tr>
+    <tr><td>Email</td><td>{{ user.email if user and user.email else "—" }}</td></tr>
     <tr><td>Verified</td><td>{{ profile.is_verified }}</td></tr>
     <tr><td>Status</td><td>{{ user.status if user else "?" }}</td></tr>
     <tr><td>National ID</td><td>{% if revealed %}<code>{{ revealed.national_id }}</code>{% else %}••••••••{% endif %}</td></tr>
     <tr><td>Passport</td><td>{% if revealed %}<code>{{ revealed.passport_id }}</code>{% else %}••••••••{% endif %}</td></tr>
   </table>
 </section>
-{% if can_edit %}
 <section class="card edit-card">
   <h2>Edit courier profile</h2>
   <form method="post" action="/admin/couriers/{{ profile.user_id }}/edit">
@@ -21,9 +23,6 @@
     <button type="submit">Save profile</button>
   </form>
 </section>
-{% else %}
-<p class="note">Step-up verification is required before editing this profile.</p>
-{% endif %}
 <div class="actions">
   <form method="post" action="/admin/couriers/{{ profile.user_id }}/verify">
     <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">

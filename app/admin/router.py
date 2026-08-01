@@ -203,7 +203,6 @@ async def courier_detail(request: Request, db: DbDep, courier_id: uuid.UUID) -> 
         profile=profile,
         user=user,
         revealed=None,
-        can_edit=await ctx.auth.has_step_up(ctx.session_row.session_token_hash),
     )
 
 
@@ -250,7 +249,6 @@ async def courier_reveal(
         profile=profile,
         user=user,
         revealed=revealed,
-        can_edit=True,
     )
     response.headers["Cache-Control"] = "no-store"
     return response
@@ -268,7 +266,6 @@ async def courier_edit(
     """Update the safe public fields of a courier profile."""
     ctx = await _ctx(request, db)
     verify_csrf(ctx, csrf_token, get_settings_from(request))
-    await require_step_up(ctx)
     await ctx.service.update_courier_profile(
         admin_id=ctx.admin.id,
         courier_user_id=courier_id,
@@ -438,7 +435,6 @@ async def user_detail(request: Request, db: DbDep, user_id: uuid.UUID) -> HTMLRe
         "user_detail.html",
         ctx=ctx,
         user=user,
-        can_edit=await ctx.auth.has_step_up(ctx.session_row.session_token_hash),
     )
 
 
@@ -482,7 +478,6 @@ async def user_edit(
     """Update a user's non-authentication profile fields."""
     ctx = await _ctx(request, db)
     verify_csrf(ctx, csrf_token, get_settings_from(request))
-    await require_step_up(ctx)
     await ctx.service.update_user_profile(
         admin_id=ctx.admin.id,
         user_id=user_id,

@@ -35,6 +35,7 @@ from app.models.enums import (
 _PAGE_SIZE = 50
 _EDITABLE_TABLES = frozenset({"users", "courier_profiles", "orders"})
 _EDIT_URL_COLUMNS = {"users": "id", "courier_profiles": "user_id", "orders": "id"}
+_ADMIN_VISIBLE_USER_COLUMNS = {"phone", "email", "full_name", "date_of_birth"}
 _REDACTED_MARKERS = (
     "encrypted",
     "token",
@@ -128,7 +129,7 @@ class AdminReadRepository:
         has_next = len(mappings) > _PAGE_SIZE
         rows = [
             AdminTableRow(
-                cells=[self._display_value(column, row[column]) for column in columns],
+                cells=[self._display_value(table_name, column, row[column]) for column in columns],
                 edit_url=self._edit_url(table_name, row),
             )
             for row in mappings[:_PAGE_SIZE]
@@ -152,12 +153,13 @@ class AdminReadRepository:
         return f"/admin/{plural}/{row[key]}"
 
     @staticmethod
-    def _display_value(column: str, value: object) -> str:
+    def _display_value(table_name: str, column: str, value: object) -> str:
         """Format a DB value for display while redacting sensitive columns."""
         normalized = column.lower()
-        if normalized in _REDACTED_COLUMNS or any(
-            marker in normalized for marker in _REDACTED_MARKERS
-        ):
+        if (
+            normalized in _REDACTED_COLUMNS
+            and not (table_name == "users" and normalized in _ADMIN_VISIBLE_USER_COLUMNS)
+        ) or any(marker in normalized for marker in _REDACTED_MARKERS):
             return "••••••"
         if value is None:
             return "—"

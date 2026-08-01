@@ -181,9 +181,10 @@ authenticates with environment-backed username/password into server-side session
 calls the **same** services as the JSON API — it never queries the DB directly.
 
 `/admin/tables` provides a paginated, redacted view of every application table. Those
-views are read-only except for audited, step-up-protected user, courier-profile, and
-eligible order delivery-detail updates. See `docs/endpoints/admin.md` for the exact
-field-level boundary.
+views are read-only except for audited user, courier-profile, and eligible order
+delivery-detail updates. Signed-in dashboard admins can view user and courier contact
+fields; documents, tokens, encrypted values, and financial fields remain restricted.
+See `docs/endpoints/admin.md` for the exact field-level boundary.
 
 ## Docs
 

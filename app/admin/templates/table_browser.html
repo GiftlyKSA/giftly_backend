@@ -14,7 +14,8 @@
   </span>
 </div>
 <p class="note">
-  Showing up to 50 records per page. Encrypted, credential, token, and personal-contact fields stay masked.
+  Showing up to 50 records per page. Encrypted, credential, and token fields stay masked.
+  {% if data.table.name == "users" %}Signed-in dashboard admins can view user contact fields.{% else %}Personal-contact fields stay masked.{% endif %}
   {% if data.table.editable %}Open a record link to edit only the safe fields for this table.{% endif %}
 </p>
 <div class="table-scroll">

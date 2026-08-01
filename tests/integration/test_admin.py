@@ -1,7 +1,7 @@
 """End-to-end admin dashboard tests: table browser, controlled edits, and sessions.
 
-Exercises the real session cookie, CSRF verification, password step-up, redacted table
-browser, read-only table policy, and audit logging against PostgreSQL and Redis.
+Exercises the real session cookie, CSRF verification, admin-visible user data, redacted
+table browser, read-only table policy, and audit logging against PostgreSQL and Redis.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ async def test_admin_table_browser_and_controlled_edit_flow() -> None:
     try:
         async with factory() as session:
             await session.execute(select(User.id).limit(1))
-    except Exception as exc:  # noqa: BLE001 — no DB available; skip.
+    except Exception as exc:  # noqa: BLE001 - no DB available; skip.
         await engine.dispose()
         pytest.skip(f"database unavailable: {exc}")
 
@@ -74,14 +74,14 @@ async def test_admin_table_browser_and_controlled_edit_flow() -> None:
             assert cookie
             csrf = make_csrf_token(sha256_hex(cookie), _ADMIN_SECRET)
 
-            # 3. Every application table is browsable, while sensitive values stay masked.
+            # 3. Every application table is browsable; users expose admin-visible contacts.
             catalog = await client.get("/admin/tables")
             assert catalog.status_code == 200
             assert "Data tables" in catalog.text
             assert "Admin Sessions" in catalog.text
             users = await client.get("/admin/tables/users")
             assert users.status_code == 200
-            assert "••••••" in users.text
+            assert internal_phone in users.text
 
             # 4. Promo writes have no dashboard route; the table is read-only.
             assert (await client.post("/admin/promos", data={})).status_code == 405
@@ -90,28 +90,7 @@ async def test_admin_table_browser_and_controlled_edit_flow() -> None:
                 admin = await session.scalar(select(User).where(User.phone == internal_phone))
                 assert admin is not None
 
-            # 5. A valid CSRF token alone cannot edit an allowed table.
-            no_stepup = await client.post(
-                f"/admin/users/{admin.id}/edit",
-                data={
-                    "csrf_token": csrf,
-                    "full_name": "Dashboard operator",
-                    "email": "operator@example.test",
-                },
-            )
-            assert no_stepup.status_code == 403
-
-            # 6. Password step-up permits the controlled user profile update.
-            await client.post("/admin/step-up/request", data={"next": f"/admin/users/{admin.id}"})
-            step = await client.post(
-                "/admin/step-up",
-                data={
-                    "password": _ADMIN_PASSWORD,
-                    "next": f"/admin/users/{admin.id}",
-                    "csrf_token": csrf,
-                },
-            )
-            assert step.status_code == 303
+            # 5. An authenticated admin may update the allowed user profile with CSRF.
             updated = await client.post(
                 f"/admin/users/{admin.id}/edit",
                 data={
@@ -122,7 +101,7 @@ async def test_admin_table_browser_and_controlled_edit_flow() -> None:
             )
             assert updated.status_code == 303
 
-        # 7. The controlled update is persisted and audited.
+        # 6. The controlled update is persisted and audited.
         async with factory() as session:
             actor = await session.scalar(select(User).where(User.phone == internal_phone))
             assert actor is not None and actor.full_name == "Dashboard operator"

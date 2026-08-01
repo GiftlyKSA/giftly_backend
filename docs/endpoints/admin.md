@@ -27,8 +27,8 @@ Because the dashboard uses cookies, **every state-changing form carries a CSRF t
 `SameSite=Strict` is a second layer.
 
 **Step-up re-authentication** (password confirmation, valid ~5 minutes) is required before:
-revealing an identity document or IBAN, changing a user or courier profile, changing
-eligible order delivery details, verifying a courier, and banning/unbanning a user.
+revealing an identity document or IBAN, changing eligible order delivery details,
+verifying a courier, and banning/unbanning a user.
 
 - `POST /admin/step-up/request` — shows the password confirmation form.
 - `POST /admin/step-up` — verifies the password and opens the step-up window.
@@ -40,7 +40,7 @@ eligible order delivery details, verifying a courier, and banning/unbanning a us
 | `GET /admin` | overview: order counts, open disputes, pending withdrawals, system balances |
 | `GET /admin/tables` | catalog of every application-owned table and its access mode |
 | `GET /admin/tables/{table}?page=N` | bounded (50-row), redacted browser for any application table |
-| `GET /admin/couriers`, `/admin/couriers/{id}` | list pending, detail (identity masked); city and bio may be edited after step-up |
+| `GET /admin/couriers`, `/admin/couriers/{id}` | list pending and detail; contact fields, city, and bio are visible to signed-in dashboard admins |
 | `POST /admin/couriers/{id}/verify` | approve/reject (step-up + CSRF + audit) |
 | `POST /admin/couriers/{id}/reveal-identity` | decrypt identity once (step-up + audit, `no-store`) |
 | `GET /admin/orders`, `/admin/orders/{id}` | delivery detail; only `NEW`/`ASSIGNED` orders may have city, date, description, or address note changed after step-up |
@@ -52,16 +52,17 @@ eligible order delivery details, verifying a courier, and banning/unbanning a us
 | `GET /admin/withdrawals` | read-only; IBANs masked |
 | `GET /admin/wallets`, `/admin/wallets/{id}` | system + user balances |
 | `GET /admin/topups` | wallet top-up intents |
-| `GET /admin/users/{id}` | detail; contact fields are disclosed only after step-up |
-| `POST /admin/users/{id}/edit` | controlled full-name/email change (step-up + CSRF + audit) |
+| `GET /admin/users/{id}` | detail; contact fields are visible to signed-in dashboard admins |
+| `POST /admin/users/{id}/edit` | controlled full-name/email change (CSRF + audit) |
 | `POST /admin/users/{id}/ban` · `/unban` | moderate (step-up + CSRF + audit) |
 | `GET /admin/audit-logs` | read-only audit trail |
 
 The table catalog is metadata-backed and therefore includes all application tables without
 exposing Postgres/PostGIS system tables. It is view-only except for the record links to
-the controlled `users`, `courier_profiles`, and `orders` workflows above. Sensitive values
-(including contact data, tokens, encrypted fields, addresses, and identity fingerprints)
-are redacted in generic table views. Pagination is capped at 50 rows per page.
+the controlled `users`, `courier_profiles`, and `orders` workflows above. Signed-in
+dashboard admins can see contact fields in the `users` table and linked user/courier
+details; tokens, encrypted fields, addresses, and identity fingerprints remain redacted
+in generic table views. Pagination is capped at 50 rows per page.
 
 ## Money boundary
 

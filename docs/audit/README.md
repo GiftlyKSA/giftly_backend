@@ -29,7 +29,7 @@ unless they still apply.
 | WebSocket guards | Ban check and rate limit now share one Redis Lua round trip and fail closed. |
 | Application lifecycle | Deprecated shutdown event replaced with FastAPI lifespan cleanup. |
 | Admin authentication | Environment-backed credentials, fail-closed attempt throttling, secure sessions, password step-up, and production rejection of development defaults. |
-| Admin data visibility | Every application table is visible through a bounded, redacted catalog; generic views are read-only and the three allowed edit workflows are step-up-protected and audited. |
+| Admin data visibility | Every application table is visible through a bounded catalog; signed-in admins can view user contacts, while restricted values stay redacted and the three allowed edit workflows are audited. |
 | Chat durability | Message commits and recipient notification finish before Redis publishes the live event. |
 | Private media | Upload URL signs exact length and content type; CloudFront read URLs are RSA/SHA-256 signed; production storage config is fail-closed. |
 | Push fanout | Provider calls are bounded to 500 tokens per batch. |

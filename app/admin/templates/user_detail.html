@@ -4,11 +4,13 @@
 {% if not user %}<p>Not found.</p>{% else %}
 <section class="card"><table>
   <tr><td>ID</td><td>{{ user.id }}</td></tr>
+  <tr><td>Phone</td><td>{{ user.phone }}</td></tr>
+  <tr><td>Full name</td><td>{{ user.full_name or "—" }}</td></tr>
+  <tr><td>Email</td><td>{{ user.email or "—" }}</td></tr>
   <tr><td>Role</td><td>{{ user.role }}</td></tr>
   <tr><td>Status</td><td>{{ user.status }}</td></tr>
   <tr><td>Rating</td><td>{{ user.rating }} ({{ user.rating_count }})</td></tr>
 </table></section>
-{% if can_edit %}
 <section class="card edit-card">
   <h2>Edit user profile</h2>
   <form method="post" action="/admin/users/{{ user.id }}/edit">
@@ -18,9 +20,6 @@
     <button type="submit">Save user profile</button>
   </form>
 </section>
-{% else %}
-<p class="note">Step-up verification is required before viewing or editing profile contact fields.</p>
-{% endif %}
 <div class="actions">
   <form method="post" action="/admin/users/{{ user.id }}/ban">
     <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}"><button type="submit" class="danger">Ban</button></form>
