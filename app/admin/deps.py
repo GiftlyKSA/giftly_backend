@@ -23,6 +23,7 @@ from app.repositories.admin_session_repository import AdminSessionRepository
 from app.repositories.audit_repository import AuditRepository
 from app.repositories.auth_repository import AuthRepository
 from app.repositories.courier_repository import CourierRepository
+from app.repositories.order_repository import OrderRepository
 from app.repositories.promo_repository import PromoRepository
 from app.repositories.user_repository import UserRepository
 from app.services.admin_auth_service import AdminAuthService
@@ -92,6 +93,7 @@ def build_admin_service(db: AsyncSession, settings: Settings, redis: Redis) -> A
         reads=AdminReadRepository(db),
         users=UserRepository(db),
         couriers=CourierRepository(db),
+        orders=OrderRepository(db),
         promos=PromoRepository(db),
         audit=AuditRepository(db),
         auth_repo=AuthRepository(db),

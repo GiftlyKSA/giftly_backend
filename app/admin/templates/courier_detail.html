@@ -11,6 +11,19 @@
     <tr><td>Passport</td><td>{% if revealed %}<code>{{ revealed.passport_id }}</code>{% else %}••••••••{% endif %}</td></tr>
   </table>
 </section>
+{% if can_edit %}
+<section class="card edit-card">
+  <h2>Edit courier profile</h2>
+  <form method="post" action="/admin/couriers/{{ profile.user_id }}/edit">
+    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
+    <label>City<input name="city_of_residence" value="{{ profile.city_of_residence }}" maxlength="100" required></label>
+    <label>Bio<textarea name="bio" maxlength="1000">{{ profile.bio or "" }}</textarea></label>
+    <button type="submit">Save profile</button>
+  </form>
+</section>
+{% else %}
+<p class="note">Step-up verification is required before editing this profile.</p>
+{% endif %}
 <div class="actions">
   <form method="post" action="/admin/couriers/{{ profile.user_id }}/verify">
     <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">

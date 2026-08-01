@@ -25,6 +25,9 @@ verification (OPEN-1) and ownership-checked private-media delivery (OPEN-2).
   cookies, CSRF, audit attribution, and password step-up.
 - Ownership is enforced in repository queries; JSON admin money actions require an
   ADMIN JWT; dashboard mutations retain CSRF, strict cookies, and step-up controls.
+- The dashboard's metadata-backed table browser is bounded to 50 rows and redacts
+  contact, token, encrypted, identity, and address fields. Its generic data views are
+  read-only; the three controlled edit workflows require step-up and write audit rows.
 - Paylink webhooks check trusted peer IP, then constant-time HMAC over raw bytes, then
   lock/status/amount/idempotency controls. Trusted forwarded headers are accepted only
   from configured proxy IPs/CIDRs.

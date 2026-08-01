@@ -10,11 +10,11 @@ withdrawals) are shown read-only; they belong to the ledger service.
 from __future__ import annotations
 
 import uuid
-from decimal import Decimal
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi import APIRouter, Depends, Form, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -32,7 +32,6 @@ from app.admin.deps import (
     verify_csrf,
 )
 from app.core.exceptions import RateLimitedError, UnauthorizedError
-from app.models.enums import PromoDiscountType
 
 router = APIRouter(prefix="/admin", tags=["admin"], include_in_schema=False)
 
@@ -156,6 +155,30 @@ async def overview(request: Request, db: DbDep) -> HTMLResponse:
     return _render(request, "overview.html", ctx=ctx, overview=data)
 
 
+# --- Application data tables -------------------------------------------------
+
+
+@router.get("/tables", response_class=HTMLResponse)
+async def table_catalog(request: Request, db: DbDep) -> HTMLResponse:
+    """List every application-owned table and its dashboard interaction mode."""
+    ctx = await _ctx(request, db)
+    tables = ctx.service.list_table_catalog()
+    return _render(request, "tables.html", ctx=ctx, tables=tables, table_count=len(tables))
+
+
+@router.get("/tables/{table_name}", response_class=HTMLResponse)
+async def table_browser(
+    request: Request,
+    db: DbDep,
+    table_name: str,
+    page: Annotated[int, Query(ge=1, le=100_000)] = 1,
+) -> HTMLResponse:
+    """Render one bounded, redacted page from an application table."""
+    ctx = await _ctx(request, db)
+    data = await ctx.service.get_table_page(table_name, page=page)
+    return _render(request, "table_browser.html", ctx=ctx, data=data)
+
+
 # --- Couriers ----------------------------------------------------------------
 
 
@@ -174,7 +197,13 @@ async def courier_detail(request: Request, db: DbDep, courier_id: uuid.UUID) -> 
     profile = await ctx.service.get_courier(courier_id)
     user = await ctx.service.get_user(courier_id)
     return _render(
-        request, "courier_detail.html", ctx=ctx, profile=profile, user=user, revealed=None
+        request,
+        "courier_detail.html",
+        ctx=ctx,
+        profile=profile,
+        user=user,
+        revealed=None,
+        can_edit=await ctx.auth.has_step_up(ctx.session_row.session_token_hash),
     )
 
 
@@ -215,13 +244,42 @@ async def courier_reveal(
     profile = await ctx.service.get_courier(courier_id)
     user = await ctx.service.get_user(courier_id)
     response = _render(
-        request, "courier_detail.html", ctx=ctx, profile=profile, user=user, revealed=revealed
+        request,
+        "courier_detail.html",
+        ctx=ctx,
+        profile=profile,
+        user=user,
+        revealed=revealed,
+        can_edit=True,
     )
     response.headers["Cache-Control"] = "no-store"
     return response
 
 
-# --- Orders / invoices (read-only) ------------------------------------------
+@router.post("/couriers/{courier_id}/edit")
+async def courier_edit(
+    request: Request,
+    db: DbDep,
+    courier_id: uuid.UUID,
+    csrf_token: Annotated[str, Form()],
+    city_of_residence: Annotated[str, Form(min_length=1, max_length=100)],
+    bio: Annotated[str, Form(max_length=1000)] = "",
+) -> RedirectResponse:
+    """Update the safe public fields of a courier profile."""
+    ctx = await _ctx(request, db)
+    verify_csrf(ctx, csrf_token, get_settings_from(request))
+    await require_step_up(ctx)
+    await ctx.service.update_courier_profile(
+        admin_id=ctx.admin.id,
+        courier_user_id=courier_id,
+        city_of_residence=city_of_residence.strip(),
+        bio=bio.strip() or None,
+        ip=client_ip(request),
+    )
+    return RedirectResponse(f"/admin/couriers/{courier_id}", status_code=303)
+
+
+# --- Orders / invoices -------------------------------------------------------
 
 
 @router.get("/orders", response_class=HTMLResponse)
@@ -237,7 +295,40 @@ async def order_detail(request: Request, db: DbDep, order_id: uuid.UUID) -> HTML
     """Show an order."""
     ctx = await _ctx(request, db)
     order = await ctx.service.get_order(order_id)
-    return _render(request, "order_detail.html", ctx=ctx, order=order)
+    return _render(
+        request,
+        "order_detail.html",
+        ctx=ctx,
+        order=order,
+        can_edit=await ctx.auth.has_step_up(ctx.session_row.session_token_hash),
+    )
+
+
+@router.post("/orders/{order_id}/edit")
+async def order_edit(
+    request: Request,
+    db: DbDep,
+    order_id: uuid.UUID,
+    csrf_token: Annotated[str, Form()],
+    delivery_city: Annotated[str, Form(min_length=1, max_length=100)],
+    delivery_date: Annotated[date, Form()],
+    description: Annotated[str, Form(max_length=5000)] = "",
+    delivery_address_note: Annotated[str, Form(max_length=255)] = "",
+) -> RedirectResponse:
+    """Update non-financial order details while the order is still editable."""
+    ctx = await _ctx(request, db)
+    verify_csrf(ctx, csrf_token, get_settings_from(request))
+    await require_step_up(ctx)
+    await ctx.service.update_order_details(
+        admin_id=ctx.admin.id,
+        order_id=order_id,
+        description=description.strip() or None,
+        delivery_city=delivery_city.strip(),
+        delivery_date=delivery_date,
+        delivery_address_note=delivery_address_note.strip() or None,
+        ip=client_ip(request),
+    )
+    return RedirectResponse(f"/admin/orders/{order_id}", status_code=303)
 
 
 @router.get("/invoices", response_class=HTMLResponse)
@@ -256,7 +347,7 @@ async def invoice_detail(request: Request, db: DbDep, invoice_id: uuid.UUID) -> 
     return _render(request, "invoice_detail.html", ctx=ctx, invoice=invoice)
 
 
-# --- Promos ------------------------------------------------------------------
+# --- Promos (read-only) ------------------------------------------------------
 
 
 @router.get("/promos", response_class=HTMLResponse)
@@ -267,82 +358,12 @@ async def promos(request: Request, db: DbDep) -> HTMLResponse:
     return _render(request, "promos.html", ctx=ctx, promos=rows)
 
 
-@router.get("/promos/new", response_class=HTMLResponse)
-async def promo_new(request: Request, db: DbDep) -> HTMLResponse:
-    """Show the promo creation form."""
-    ctx = await _ctx(request, db)
-    return _render(request, "promo_new.html", ctx=ctx)
-
-
-@router.post("/promos")
-async def promo_create(
-    request: Request,
-    db: DbDep,
-    csrf_token: Annotated[str, Form()],
-    code: Annotated[str, Form()],
-    description: Annotated[str, Form()],
-    discount_type: Annotated[str, Form()],
-    min_order_amount: Annotated[str, Form()] = "0.00",
-    max_usages_per_user: Annotated[int, Form()] = 1,
-    percent_value: Annotated[str, Form()] = "",
-    fixed_amount: Annotated[str, Form()] = "",
-    max_discount_amount: Annotated[str, Form()] = "",
-    max_total_usages: Annotated[str, Form()] = "",
-) -> RedirectResponse:
-    """Create a promo (step-up + CSRF + audit)."""
-    ctx = await _ctx(request, db)
-    verify_csrf(ctx, csrf_token, get_settings_from(request))
-    await require_step_up(ctx)
-    promo_id = await ctx.service.create_promo(
-        admin_id=ctx.admin.id,
-        code=code,
-        description=description,
-        discount_type=PromoDiscountType(discount_type),
-        percent_value=Decimal(percent_value) if percent_value else None,
-        fixed_amount=Decimal(fixed_amount) if fixed_amount else None,
-        max_discount_amount=Decimal(max_discount_amount) if max_discount_amount else None,
-        min_order_amount=Decimal(min_order_amount or "0.00"),
-        max_total_usages=int(max_total_usages) if max_total_usages else None,
-        max_usages_per_user=max_usages_per_user,
-        ip=client_ip(request),
-    )
-    return RedirectResponse(f"/admin/promos/{promo_id}", status_code=303)
-
-
 @router.get("/promos/{promo_id}", response_class=HTMLResponse)
 async def promo_detail(request: Request, db: DbDep, promo_id: uuid.UUID) -> HTMLResponse:
     """Show a promo."""
     ctx = await _ctx(request, db)
     promo = await ctx.service.get_promo(promo_id)
     return _render(request, "promo_detail.html", ctx=ctx, promo=promo)
-
-
-@router.post("/promos/{promo_id}/activate")
-async def promo_activate(
-    request: Request, db: DbDep, promo_id: uuid.UUID, csrf_token: Annotated[str, Form()]
-) -> RedirectResponse:
-    """Activate a promo (step-up + CSRF + audit)."""
-    ctx = await _ctx(request, db)
-    verify_csrf(ctx, csrf_token, get_settings_from(request))
-    await require_step_up(ctx)
-    await ctx.service.set_promo_active(
-        admin_id=ctx.admin.id, promo_id=promo_id, active=True, ip=client_ip(request)
-    )
-    return RedirectResponse(f"/admin/promos/{promo_id}", status_code=303)
-
-
-@router.post("/promos/{promo_id}/deactivate")
-async def promo_deactivate(
-    request: Request, db: DbDep, promo_id: uuid.UUID, csrf_token: Annotated[str, Form()]
-) -> RedirectResponse:
-    """Deactivate a promo (step-up + CSRF + audit)."""
-    ctx = await _ctx(request, db)
-    verify_csrf(ctx, csrf_token, get_settings_from(request))
-    await require_step_up(ctx)
-    await ctx.service.set_promo_active(
-        admin_id=ctx.admin.id, promo_id=promo_id, active=False, ip=client_ip(request)
-    )
-    return RedirectResponse(f"/admin/promos/{promo_id}", status_code=303)
 
 
 @router.get("/promos/{promo_id}/redemptions", response_class=HTMLResponse)
@@ -412,7 +433,13 @@ async def user_detail(request: Request, db: DbDep, user_id: uuid.UUID) -> HTMLRe
     """Show a user."""
     ctx = await _ctx(request, db)
     user = await ctx.service.get_user(user_id)
-    return _render(request, "user_detail.html", ctx=ctx, user=user)
+    return _render(
+        request,
+        "user_detail.html",
+        ctx=ctx,
+        user=user,
+        can_edit=await ctx.auth.has_step_up(ctx.session_row.session_token_hash),
+    )
 
 
 @router.post("/users/{user_id}/ban")
@@ -439,6 +466,29 @@ async def user_unban(
     await require_step_up(ctx)
     await ctx.service.set_user_banned(
         admin_id=ctx.admin.id, user_id=user_id, banned=False, ip=client_ip(request)
+    )
+    return RedirectResponse(f"/admin/users/{user_id}", status_code=303)
+
+
+@router.post("/users/{user_id}/edit")
+async def user_edit(
+    request: Request,
+    db: DbDep,
+    user_id: uuid.UUID,
+    csrf_token: Annotated[str, Form()],
+    full_name: Annotated[str, Form(max_length=120)] = "",
+    email: Annotated[str, Form(max_length=255)] = "",
+) -> RedirectResponse:
+    """Update a user's non-authentication profile fields."""
+    ctx = await _ctx(request, db)
+    verify_csrf(ctx, csrf_token, get_settings_from(request))
+    await require_step_up(ctx)
+    await ctx.service.update_user_profile(
+        admin_id=ctx.admin.id,
+        user_id=user_id,
+        full_name=full_name.strip() or None,
+        email=email.strip().lower() or None,
+        ip=client_ip(request),
     )
     return RedirectResponse(f"/admin/users/{user_id}", status_code=303)
 

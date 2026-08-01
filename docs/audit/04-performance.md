@@ -14,6 +14,8 @@ and batch-limited workers. No N+1 defect was found on a money or list path.
 - HTTP throttling is one Lua call. WebSocket ban + throttle is also one Lua call.
 - List endpoints cap page size at 100 and use keyset cursors; worker sweeps use indexed
   limits. Refresh-token cleanup bounds auth-table growth.
+- The admin table catalog reads metadata, and each generic table query is capped at 50
+  rows plus one look-ahead row; it never materializes a whole application table.
 - Push delivery splits token lists into provider-safe batches of 500.
 - S3 bytes bypass the API; upload and JSON body sizes are independently bounded.
 

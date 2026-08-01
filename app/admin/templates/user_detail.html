@@ -8,6 +8,19 @@
   <tr><td>Status</td><td>{{ user.status }}</td></tr>
   <tr><td>Rating</td><td>{{ user.rating }} ({{ user.rating_count }})</td></tr>
 </table></section>
+{% if can_edit %}
+<section class="card edit-card">
+  <h2>Edit user profile</h2>
+  <form method="post" action="/admin/users/{{ user.id }}/edit">
+    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
+    <label>Full name<input name="full_name" value="{{ user.full_name or "" }}" maxlength="120"></label>
+    <label>Email<input name="email" type="email" value="{{ user.email or "" }}" maxlength="255"></label>
+    <button type="submit">Save user profile</button>
+  </form>
+</section>
+{% else %}
+<p class="note">Step-up verification is required before viewing or editing profile contact fields.</p>
+{% endif %}
 <div class="actions">
   <form method="post" action="/admin/users/{{ user.id }}/ban">
     <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}"><button type="submit" class="danger">Ban</button></form>

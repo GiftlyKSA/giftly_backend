@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
@@ -20,12 +21,13 @@ from app.core.redis import build_redis
 from app.core.security import sha256_hex
 from app.integrations.sms.fake import FakeSmsClient
 from app.models import CourierProfile, User, Wallet, Withdrawal
-from app.models.enums import PromoDiscountType, UserRole, UserStatus, WalletType, WithdrawalStatus
+from app.models.enums import UserRole, UserStatus, WalletType, WithdrawalStatus
 from app.repositories.admin_read_repository import AdminReadRepository
 from app.repositories.admin_session_repository import AdminSessionRepository
 from app.repositories.audit_repository import AuditRepository
 from app.repositories.auth_repository import AuthRepository
 from app.repositories.courier_repository import CourierRepository
+from app.repositories.order_repository import OrderRepository
 from app.repositories.promo_repository import PromoRepository
 from app.repositories.user_repository import UserRepository
 from app.services.admin_auth_service import AdminAuthService
@@ -53,6 +55,7 @@ def _admin_service(db: AsyncSession, settings: Settings, redis: Redis) -> AdminS
         reads=AdminReadRepository(db),
         users=UserRepository(db),
         couriers=CourierRepository(db),
+        orders=OrderRepository(db),
         promos=PromoRepository(db),
         audit=AuditRepository(db),
         auth_repo=AuthRepository(db),
@@ -95,7 +98,10 @@ async def test_overview_and_reads(db_session: AsyncSession, redis_client: Redis)
     assert await service.list_withdrawals() is not None
     assert await service.list_wallets() is not None
     assert await service.list_topups() is not None
-    assert await service.list_promos() is not None
+    assert len(service.list_table_catalog()) == 23
+    page = await service.get_table_page("users", page=1)
+    assert page is not None and page.table.editable is True
+    assert "phone" in page.columns
     assert await service.list_audit_logs() is not None
 
 
@@ -136,6 +142,16 @@ async def test_verify_courier_and_reveal_identity(
     )
     assert revealed["national_id"] == "1122334455"
 
+    await service.update_courier_profile(
+        admin_id=admin.id,
+        courier_user_id=courier.id,
+        city_of_residence="Riyadh",
+        bio="Reliable gift courier.",
+        ip=None,
+    )
+    assert profile.city_of_residence == "Riyadh"
+    assert profile.bio == "Reliable gift courier."
+
 
 async def test_reveal_iban(db_session: AsyncSession, redis_client: Redis) -> None:
     settings = _settings()
@@ -166,7 +182,9 @@ async def test_reveal_iban(db_session: AsyncSession, redis_client: Redis) -> Non
     assert iban == "SA0380000000608010167519"
 
 
-async def test_ban_and_promo_management(db_session: AsyncSession, redis_client: Redis) -> None:
+async def test_ban_and_controlled_table_edits(
+    db_session: AsyncSession, redis_client: Redis
+) -> None:
     service = _admin_service(db_session, _settings(), redis_client)
     admin = await _admin(db_session)
     target = await _admin(db_session)
@@ -175,23 +193,36 @@ async def test_ban_and_promo_management(db_session: AsyncSession, redis_client: 
     banned = await service.get_user(target.id)
     assert banned.status is UserStatus.BANNED  # type: ignore[union-attr]
 
-    promo_id = await service.create_promo(
+    await service.update_user_profile(
         admin_id=admin.id,
-        code=f"svc{uuid.uuid4().hex[:6]}",
-        description="svc test",
-        discount_type=PromoDiscountType.PERCENT,
-        percent_value=Decimal("10.00"),
-        fixed_amount=None,
-        max_discount_amount=Decimal("100.00"),
-        min_order_amount=Decimal("0.00"),
-        max_total_usages=None,
-        max_usages_per_user=1,
+        user_id=target.id,
+        full_name="Updated user",
+        email="updated@example.test",
         ip=None,
     )
-    await service.set_promo_active(admin_id=admin.id, promo_id=promo_id, active=False, ip=None)
-    promo = await service.get_promo(promo_id)
-    assert promo.is_active is False  # type: ignore[union-attr]
-    assert await service.list_promo_redemptions(promo_id) == []
+    assert banned.full_name == "Updated user"  # type: ignore[union-attr]
+    assert banned.email == "updated@example.test"  # type: ignore[union-attr]
+
+    order = await OrderRepository(db_session).create(
+        customer_id=target.id,
+        description="Original",
+        delivery_city="Jeddah",
+        longitude=39.2,
+        latitude=21.5,
+        delivery_date=date.today() + timedelta(days=2),
+        address_note="Original note",
+    )
+    await service.update_order_details(
+        admin_id=admin.id,
+        order_id=order.id,
+        description="Updated",
+        delivery_city="Riyadh",
+        delivery_date=date.today() + timedelta(days=3),
+        delivery_address_note="Updated note",
+        ip=None,
+    )
+    assert order.delivery_city == "Riyadh"
+    assert order.description == "Updated"
 
 
 async def test_otp_service_request_verify_and_rate_limit(redis_client: Redis) -> None:

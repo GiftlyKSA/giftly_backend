@@ -1,31 +1,35 @@
 """Admin dashboard operations (SPEC SECTION 18.3).
 
 The dashboard calls these methods; it never queries the DB directly. Reads aggregate
-through the read repository; the mutations here are the ones that move no money
-(courier verification, promo management, user ban/unban, and the audited reveal of a
-Restricted identity/IBAN). Every mutation writes an audit row. Money-moving admin
-actions (dispute payout resolution, withdrawal settlement) belong to the ledger
-service and are intentionally not performed here.
+through the read repository. The only dashboard edits are safe fields on users,
+courier profiles, and pre-payment orders; every mutation writes an audit row.
+Money-moving admin actions (dispute payout resolution, withdrawal settlement) belong
+to the ledger service and are intentionally not performed here.
 """
 
 from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from redis.asyncio import Redis
 
 from app.core.config import Settings
 from app.core.crypto import build_aad, build_cipher
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import ConflictError, NotFoundError, ValidationDomainError
 from app.models import CourierProfile, Withdrawal
-from app.models.enums import PromoDiscountType, UserStatus
-from app.repositories.admin_read_repository import AdminReadRepository
+from app.models.enums import OrderStatus, UserStatus
+from app.repositories.admin_read_repository import (
+    AdminReadRepository,
+    AdminTableInfo,
+    AdminTablePage,
+)
 from app.repositories.audit_repository import AuditRepository
 from app.repositories.auth_repository import AuthRepository
 from app.repositories.courier_repository import CourierRepository
+from app.repositories.order_repository import OrderRepository
 from app.repositories.promo_repository import PromoRepository
 from app.repositories.user_repository import UserRepository
 
@@ -49,6 +53,7 @@ class AdminService:
         reads: AdminReadRepository,
         users: UserRepository,
         couriers: CourierRepository,
+        orders: OrderRepository,
         promos: PromoRepository,
         audit: AuditRepository,
         auth_repo: AuthRepository,
@@ -59,6 +64,7 @@ class AdminService:
         self._reads = reads
         self._users = users
         self._couriers = couriers
+        self._orders = orders
         self._promos = promos
         self._audit = audit
         self._auth_repo = auth_repo
@@ -151,6 +157,14 @@ class AdminService:
     async def list_audit_logs(self, limit: int = 100) -> list[object]:
         """Return recent audit-log entries."""
         return list(await self._audit.list_recent(limit=limit))
+
+    def list_table_catalog(self) -> list[AdminTableInfo]:
+        """Return every application table available through the read-only browser."""
+        return self._reads.list_table_catalog()
+
+    async def get_table_page(self, table_name: str, *, page: int) -> AdminTablePage | None:
+        """Return a bounded redacted table-browser page."""
+        return await self._reads.list_table_page(table_name, page=page)
 
     # --- Courier verification (no money) --------------------------------------
 
@@ -263,58 +277,91 @@ class AdminService:
             ip_address=ip,
         )
 
-    # --- Promo management (no money) ------------------------------------------
-
-    async def create_promo(
+    async def update_user_profile(
         self,
         *,
         admin_id: uuid.UUID,
-        code: str,
-        description: str,
-        discount_type: PromoDiscountType,
-        percent_value: Decimal | None,
-        fixed_amount: Decimal | None,
-        max_discount_amount: Decimal | None,
-        min_order_amount: Decimal,
-        max_total_usages: int | None,
-        max_usages_per_user: int,
+        user_id: uuid.UUID,
+        full_name: str | None,
+        email: str | None,
         ip: str | None,
-    ) -> uuid.UUID:
-        """Create a promo (normalized code) and audit it; returns the new promo id."""
-        promo = await self._promos.create(
-            code=code,
-            description=description,
-            discount_type=discount_type,
-            percent_value=percent_value,
-            fixed_amount=fixed_amount,
-            max_discount_amount=max_discount_amount,
-            min_order_amount=min_order_amount,
-            max_total_usages=max_total_usages,
-            max_usages_per_user=max_usages_per_user,
-            created_by_admin_id=admin_id,
-        )
-        await self._audit.record(
-            actor_user_id=admin_id,
-            action="PROMO_CREATE",
-            entity_type="promos",
-            entity_id=promo.id,
-            ip_address=ip,
-            metadata={"code": promo.code},
-        )
-        return promo.id
-
-    async def set_promo_active(
-        self, *, admin_id: uuid.UUID, promo_id: uuid.UUID, active: bool, ip: str | None
     ) -> None:
-        """Activate or deactivate a promo and audit it."""
-        promo = await self._promos.get(promo_id)
-        if promo is None:
-            raise NotFoundError("Promo not found.")
-        await self._promos.set_active(promo, is_active=active)
+        """Update a user's display name/email without changing role or credentials."""
+        user = await self._users.get(user_id)
+        if user is None:
+            raise NotFoundError("User not found.")
+        if email:
+            owner = await self._users.get_by_email(email)
+            if owner is not None and owner.id != user_id:
+                raise ConflictError("That email is already used by another user.")
+        await self._users.update_admin_profile(user, full_name=full_name, email=email)
         await self._audit.record(
             actor_user_id=admin_id,
-            action="PROMO_ACTIVATE" if active else "PROMO_DEACTIVATE",
-            entity_type="promos",
-            entity_id=promo_id,
+            action="USER_PROFILE_UPDATE",
+            entity_type="users",
+            entity_id=user_id,
+            ip_address=ip,
+        )
+
+    async def update_courier_profile(
+        self,
+        *,
+        admin_id: uuid.UUID,
+        courier_user_id: uuid.UUID,
+        city_of_residence: str,
+        bio: str | None,
+        ip: str | None,
+    ) -> None:
+        """Update a courier's public profile fields and record the administrator action."""
+        profile = await self._couriers.get(courier_user_id)
+        if profile is None:
+            raise NotFoundError("Courier not found.")
+        if not city_of_residence:
+            raise ValidationDomainError("City is required.")
+        await self._couriers.update_admin_profile(
+            profile, city_of_residence=city_of_residence, bio=bio
+        )
+        await self._audit.record(
+            actor_user_id=admin_id,
+            action="COURIER_PROFILE_UPDATE",
+            entity_type="courier_profiles",
+            entity_id=courier_user_id,
+            ip_address=ip,
+        )
+
+    async def update_order_details(
+        self,
+        *,
+        admin_id: uuid.UUID,
+        order_id: uuid.UUID,
+        description: str | None,
+        delivery_city: str,
+        delivery_date: date,
+        delivery_address_note: str | None,
+        ip: str | None,
+    ) -> None:
+        """Update non-financial order details before payment can make them contractual."""
+        order = await self._orders.lock(order_id)
+        if order is None:
+            raise NotFoundError("Order not found.")
+        if order.status not in (OrderStatus.NEW, OrderStatus.ASSIGNED):
+            raise ConflictError("Only NEW or ASSIGNED orders may have delivery details edited.")
+        if not delivery_city:
+            raise ValidationDomainError("Delivery city is required.")
+        today = date.today()
+        if not today <= delivery_date <= today + timedelta(days=180):
+            raise ValidationDomainError("Delivery date must be within the next 180 days.")
+        await self._orders.update_admin_details(
+            order,
+            description=description,
+            delivery_city=delivery_city,
+            delivery_date=delivery_date,
+            delivery_address_note=delivery_address_note,
+        )
+        await self._audit.record(
+            actor_user_id=admin_id,
+            action="ORDER_DETAILS_UPDATE",
+            entity_type="orders",
+            entity_id=order_id,
             ip_address=ip,
         )

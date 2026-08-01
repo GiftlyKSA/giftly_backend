@@ -31,6 +31,11 @@ class UserRepository:
         result: User | None = await self._session.scalar(select(User).where(User.phone == phone))
         return result
 
+    async def get_by_email(self, email: str) -> User | None:
+        """Return a user by exact email, or None."""
+        result: User | None = await self._session.scalar(select(User).where(User.email == email))
+        return result
+
     async def ensure_dashboard_admin(self, username: str) -> User | None:
         """Return the stable DB actor used by environment-authenticated dashboard sessions.
 
@@ -53,6 +58,14 @@ class UserRepository:
         )
         await self._session.flush()
         return await self.get(admin_id)
+
+    async def update_admin_profile(
+        self, user: User, *, full_name: str | None, email: str | None
+    ) -> None:
+        """Update the safe, non-authentication fields exposed in the admin dashboard."""
+        user.full_name = full_name
+        user.email = email
+        await self._session.flush()
 
     async def set_status(self, user: User, status: UserStatus) -> None:
         """Update a user's account status (ban/unban)."""

@@ -12,12 +12,6 @@
 </table></section>
 <div class="actions">
   <a class="btn" href="/admin/promos/{{ promo.id }}/redemptions">Redemptions</a>
-  <form method="post" action="/admin/promos/{{ promo.id }}/activate">
-    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}"><button type="submit">Activate</button></form>
-  <form method="post" action="/admin/promos/{{ promo.id }}/deactivate">
-    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}"><button type="submit" class="danger">Deactivate</button></form>
-  <form method="post" action="/admin/step-up/request">
-    <input type="hidden" name="next" value="/admin/promos/{{ promo.id }}"><button type="submit">Step-up</button></form>
 </div>
 {% endif %}
 {% endblock %}

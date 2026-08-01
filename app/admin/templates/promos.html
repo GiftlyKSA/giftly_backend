@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Promos <a class="btn" href="/admin/promos/new">New</a></h1>
+<h1>Promos</h1>
+<p class="note">Read-only. Promo pricing rules cannot be changed from the dashboard.</p>
 <table class="list">
   <thead><tr><th>Code</th><th>Type</th><th>Active</th><th>Used</th><th>Cap</th></tr></thead>
   <tbody>{% for p in promos %}

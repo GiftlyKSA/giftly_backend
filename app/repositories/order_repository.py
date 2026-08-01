@@ -122,6 +122,22 @@ class OrderRepository:
         )
         return result
 
+    async def update_admin_details(
+        self,
+        order: Order,
+        *,
+        description: str | None,
+        delivery_city: str,
+        delivery_date: date,
+        delivery_address_note: str | None,
+    ) -> None:
+        """Update non-financial, non-location order details for an administrator."""
+        order.description = description
+        order.delivery_city = delivery_city
+        order.delivery_date = delivery_date
+        order.delivery_address_note = delivery_address_note
+        await self._session.flush()
+
     async def count_customer_active(self, customer_id: uuid.UUID) -> int:
         """Count a customer's non-terminal orders (concurrency limit)."""
         total = await self._session.scalar(

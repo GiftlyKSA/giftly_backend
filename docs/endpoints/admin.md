@@ -27,8 +27,8 @@ Because the dashboard uses cookies, **every state-changing form carries a CSRF t
 `SameSite=Strict` is a second layer.
 
 **Step-up re-authentication** (password confirmation, valid ~5 minutes) is required before:
-revealing an identity document or IBAN, creating/activating/deactivating a promo,
-verifying a courier, and banning/unbanning a user.
+revealing an identity document or IBAN, changing a user or courier profile, changing
+eligible order delivery details, verifying a courier, and banning/unbanning a user.
 
 - `POST /admin/step-up/request` — shows the password confirmation form.
 - `POST /admin/step-up` — verifies the password and opens the step-up window.
@@ -38,29 +38,39 @@ verifying a courier, and banning/unbanning a user.
 | Route | Purpose |
 | --- | --- |
 | `GET /admin` | overview: order counts, open disputes, pending withdrawals, system balances |
-| `GET /admin/couriers`, `/admin/couriers/{id}` | list pending, detail (identity masked) |
+| `GET /admin/tables` | catalog of every application-owned table and its access mode |
+| `GET /admin/tables/{table}?page=N` | bounded (50-row), redacted browser for any application table |
+| `GET /admin/couriers`, `/admin/couriers/{id}` | list pending, detail (identity masked); city and bio may be edited after step-up |
 | `POST /admin/couriers/{id}/verify` | approve/reject (step-up + CSRF + audit) |
 | `POST /admin/couriers/{id}/reveal-identity` | decrypt identity once (step-up + audit, `no-store`) |
-| `GET /admin/orders`, `/admin/orders/{id}` | read-only |
+| `GET /admin/orders`, `/admin/orders/{id}` | delivery detail; only `NEW`/`ASSIGNED` orders may have city, date, description, or address note changed after step-up |
+| `POST /admin/orders/{id}/edit` | controlled non-financial delivery-detail update (step-up + CSRF + audit) |
 | `GET /admin/invoices`, `/admin/invoices/{id}` | read-only (admins never author invoices) |
-| `GET /admin/promos`, `/admin/promos/new`, `/admin/promos/{id}` | list / create / detail |
-| `POST /admin/promos` | create (step-up + CSRF + audit; code normalized upper) |
-| `POST /admin/promos/{id}/activate` · `/deactivate` | toggle (step-up + CSRF + audit) |
+| `GET /admin/promos`, `/admin/promos/{id}` | read-only list and detail |
 | `GET /admin/promos/{id}/redemptions` | who used it, when, how much |
 | `GET /admin/disputes`, `/admin/disputes/{id}` | read-only |
 | `GET /admin/withdrawals` | read-only; IBANs masked |
 | `GET /admin/wallets`, `/admin/wallets/{id}` | system + user balances |
 | `GET /admin/topups` | wallet top-up intents |
-| `GET /admin/users/{id}` | detail |
+| `GET /admin/users/{id}` | detail; contact fields are disclosed only after step-up |
+| `POST /admin/users/{id}/edit` | controlled full-name/email change (step-up + CSRF + audit) |
 | `POST /admin/users/{id}/ban` · `/unban` | moderate (step-up + CSRF + audit) |
 | `GET /admin/audit-logs` | read-only audit trail |
+
+The table catalog is metadata-backed and therefore includes all application tables without
+exposing Postgres/PostGIS system tables. It is view-only except for the record links to
+the controlled `users`, `courier_profiles`, and `orders` workflows above. Sensitive values
+(including contact data, tokens, encrypted fields, addresses, and identity fingerprints)
+are redacted in generic table views. Pagination is capped at 50 rows per page.
 
 ## Money boundary
 
 No dashboard page moves money outside the ledger service. Dispute resolution and
 withdrawal processing move escrow funds and are therefore performed through the
 double-entry ledger service (Phase 4), not the dashboard; those pages are read-only
-here. Every mutating action writes an `audit_logs` row (actor, action, entity, ip).
+here. The dashboard cannot edit payment, invoice, promo, wallet, transaction, or
+withdrawal records. Every permitted dashboard mutation writes an `audit_logs` row
+(actor, action, entity, ip).
 
 ## Withdrawal JSON actions
 

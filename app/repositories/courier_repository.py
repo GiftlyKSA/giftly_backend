@@ -45,3 +45,11 @@ class CourierRepository:
         profile.verified_at = when if is_verified else None
         profile.verified_by_admin_id = admin_id
         await self._session.flush()
+
+    async def update_admin_profile(
+        self, profile: CourierProfile, *, city_of_residence: str, bio: str | None
+    ) -> None:
+        """Update the courier-profile fields explicitly exposed to dashboard operators."""
+        profile.city_of_residence = city_of_residence
+        profile.bio = bio
+        await self._session.flush()

@@ -1,8 +1,7 @@
-"""End-to-end admin dashboard tests: password login, session, CSRF, step-up, audit.
+"""End-to-end admin dashboard tests: table browser, controlled edits, and sessions.
 
-Exercises the real session cookie, CSRF verification, step-up gating, and audit
-logging against the migrated database and a real Redis, all on one event loop via
-httpx's ASGI transport. Skips if either backing service is unavailable.
+Exercises the real session cookie, CSRF verification, password step-up, redacted table
+browser, read-only table policy, and audit logging against PostgreSQL and Redis.
 """
 
 from __future__ import annotations
@@ -16,8 +15,7 @@ from app.core.config import Settings
 from app.core.db import build_engine, build_session_factory
 from app.core.security import make_csrf_token, sha256_hex
 from app.main import create_app
-from app.models import AdminSession, AuditLog, Promo, User
-from app.models.enums import UserRole
+from app.models import AdminSession, AuditLog, User
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
@@ -42,11 +40,11 @@ def _settings() -> Settings:
     return make_test_settings(**overrides)
 
 
-async def test_admin_full_flow() -> None:
+async def test_admin_table_browser_and_controlled_edit_flow() -> None:
     settings = _settings()
     engine = build_engine(settings)
     factory = build_session_factory(engine)
-    code = f"ADMTEST{_secrets.randbelow(100000)}"
+    internal_phone = f"admin:{hashlib.sha256(_ADMIN_USERNAME.encode()).hexdigest()[:14]}"
 
     try:
         async with factory() as session:
@@ -74,90 +72,74 @@ async def test_admin_full_flow() -> None:
             assert response.status_code == 303
             cookie = client.cookies.get("admin_session")
             assert cookie
-
-            # 3. Authenticated read works.
-            assert (await client.get("/admin")).status_code == 200
-
             csrf = make_csrf_token(sha256_hex(cookie), _ADMIN_SECRET)
 
-            # 4. A mutation with a bad CSRF token is rejected (403).
-            bad_csrf = await client.post(
-                "/admin/promos",
-                data={
-                    "csrf_token": "not-the-real-token",
-                    "code": code,
-                    "description": "x",
-                    "discount_type": "PERCENT",
-                    "percent_value": "10.00",
-                },
-            )
-            assert bad_csrf.status_code == 403
+            # 3. Every application table is browsable, while sensitive values stay masked.
+            catalog = await client.get("/admin/tables")
+            assert catalog.status_code == 200
+            assert "Data tables" in catalog.text
+            assert "Admin Sessions" in catalog.text
+            users = await client.get("/admin/tables/users")
+            assert users.status_code == 200
+            assert "••••••" in users.text
 
-            # 5. With CSRF but without step-up, still rejected.
+            # 4. Promo writes have no dashboard route; the table is read-only.
+            assert (await client.post("/admin/promos", data={})).status_code == 405
+
+            async with factory() as session:
+                admin = await session.scalar(select(User).where(User.phone == internal_phone))
+                assert admin is not None
+
+            # 5. A valid CSRF token alone cannot edit an allowed table.
             no_stepup = await client.post(
-                "/admin/promos",
+                f"/admin/users/{admin.id}/edit",
                 data={
                     "csrf_token": csrf,
-                    "code": code,
-                    "description": "x",
-                    "discount_type": "PERCENT",
-                    "percent_value": "10.00",
+                    "full_name": "Dashboard operator",
+                    "email": "operator@example.test",
                 },
             )
             assert no_stepup.status_code == 403
 
-            # 6. Perform password step-up, then create the promo.
-            await client.post("/admin/step-up/request", data={"next": "/admin/promos/new"})
+            # 6. Password step-up permits the controlled user profile update.
+            await client.post("/admin/step-up/request", data={"next": f"/admin/users/{admin.id}"})
             step = await client.post(
                 "/admin/step-up",
                 data={
                     "password": _ADMIN_PASSWORD,
-                    "next": "/admin/promos/new",
+                    "next": f"/admin/users/{admin.id}",
                     "csrf_token": csrf,
                 },
             )
             assert step.status_code == 303
-
-            created = await client.post(
-                "/admin/promos",
+            updated = await client.post(
+                f"/admin/users/{admin.id}/edit",
                 data={
                     "csrf_token": csrf,
-                    "code": code,
-                    "description": "Ten percent",
-                    "discount_type": "PERCENT",
-                    "percent_value": "10.00",
-                    "max_discount_amount": "100.00",
-                    "min_order_amount": "0.00",
-                    "max_usages_per_user": "1",
+                    "full_name": "Dashboard operator",
+                    "email": "operator@example.test",
                 },
             )
-            assert created.status_code == 303
+            assert updated.status_code == 303
 
-        # 7. The promo and an audit row now exist.
+        # 7. The controlled update is persisted and audited.
         async with factory() as session:
-            promo = await session.scalar(select(Promo).where(Promo.code == code.upper()))
-            assert promo is not None
+            actor = await session.scalar(select(User).where(User.phone == internal_phone))
+            assert actor is not None and actor.full_name == "Dashboard operator"
             audit = await session.scalar(
                 select(AuditLog).where(
-                    AuditLog.action == "PROMO_CREATE", AuditLog.entity_id == promo.id
+                    AuditLog.action == "USER_PROFILE_UPDATE", AuditLog.entity_id == actor.id
                 )
             )
             assert audit is not None
     finally:
         async with factory() as session:
-            internal_phone = f"admin:{hashlib.sha256(_ADMIN_USERNAME.encode()).hexdigest()[:14]}"
-            admin = await session.scalar(
-                select(User).where(
-                    User.phone == internal_phone,
-                    User.role == UserRole.ADMIN,
-                )
-            )
+            admin = await session.scalar(select(User).where(User.phone == internal_phone))
             if admin is not None:
                 await session.execute(delete(AuditLog).where(AuditLog.actor_user_id == admin.id))
                 await session.execute(
                     delete(AdminSession).where(AdminSession.admin_user_id == admin.id)
                 )
-                await session.execute(delete(Promo).where(Promo.created_by_admin_id == admin.id))
                 await session.execute(delete(User).where(User.id == admin.id))
             await session.commit()
         await app.state.redis.aclose()

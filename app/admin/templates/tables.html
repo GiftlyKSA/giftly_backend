@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Application data</p>
+    <h1>Data tables</h1>
+  </div>
+  <p class="note">{{ table_count }} application tables. Sensitive fields are redacted in this browser.</p>
+</div>
+<section class="table-catalog">
+  {% for table in tables %}
+  <a class="table-card" href="/admin/tables/{{ table.name }}">
+    <span class="table-card__name">{{ table.label }}</span>
+    <span class="table-card__mode {% if table.editable %}is-editable{% endif %}">
+      {% if table.editable %}Controlled edit{% else %}Read only{% endif %}
+    </span>
+  </a>
+  {% endfor %}
+</section>
+{% endblock %}

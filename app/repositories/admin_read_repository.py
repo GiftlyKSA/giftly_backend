@@ -6,8 +6,13 @@ admin service — and therefore the dashboard — never issues a raw query itsel
 
 from __future__ import annotations
 
+import json
 import uuid
+from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal
+from enum import Enum
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,11 +25,68 @@ from app.models import (
     Wallet,
     Withdrawal,
 )
+from app.models.base import Base
 from app.models.enums import (
     DisputeStatus,
     OrderStatus,
     WithdrawalStatus,
 )
+
+_PAGE_SIZE = 50
+_EDITABLE_TABLES = frozenset({"users", "courier_profiles", "orders"})
+_EDIT_URL_COLUMNS = {"users": "id", "courier_profiles": "user_id", "orders": "id"}
+_REDACTED_MARKERS = (
+    "encrypted",
+    "token",
+    "secret",
+    "hash",
+    "fingerprint",
+    "password",
+)
+_REDACTED_COLUMNS = {
+    "phone",
+    "email",
+    "full_name",
+    "date_of_birth",
+    "ip_address",
+    "user_agent",
+    "delivery_address_note",
+    "iban_last4",
+    "paylink_url",
+}
+
+
+@dataclass(frozen=True)
+class AdminTableInfo:
+    """A dashboard-visible application table and its permitted interaction mode."""
+
+    name: str
+    editable: bool
+
+    @property
+    def label(self) -> str:
+        """Return a human-readable label for the table."""
+        return self.name.replace("_", " ").title()
+
+
+@dataclass(frozen=True)
+class AdminTableRow:
+    """A redacted database row ready for the server-rendered table browser."""
+
+    cells: list[str]
+    edit_url: str | None
+
+
+@dataclass(frozen=True)
+class AdminTablePage:
+    """One bounded page of a table-browser result."""
+
+    table: AdminTableInfo
+    columns: list[str]
+    edit_column: str | None
+    rows: list[AdminTableRow]
+    page: int
+    has_next: bool
 
 
 class AdminReadRepository:
@@ -33,6 +95,84 @@ class AdminReadRepository:
     def __init__(self, session: AsyncSession) -> None:
         """Bind the repository to a session."""
         self._session = session
+
+    def list_table_catalog(self) -> list[AdminTableInfo]:
+        """Return every application-owned table, excluding database extension tables."""
+        return [
+            AdminTableInfo(name=name, editable=name in _EDITABLE_TABLES)
+            for name in sorted(Base.metadata.tables)
+        ]
+
+    async def list_table_page(self, table_name: str, *, page: int) -> AdminTablePage | None:
+        """Return a bounded, redacted page for a known application table.
+
+        The table name is resolved only from SQLAlchemy metadata, never interpolated into
+        SQL. Sensitive values remain hidden even from this broad administrative browser;
+        dedicated step-up flows are the sole path to reveal restricted identity/IBAN data.
+        """
+        table = Base.metadata.tables.get(table_name)
+        if table is None:
+            return None
+        info = AdminTableInfo(name=table_name, editable=table_name in _EDITABLE_TABLES)
+        columns = [column.name for column in table.columns]
+        ordering = table.c.get("created_at")
+        if ordering is None:
+            ordering = next(iter(table.primary_key.columns), None)
+        query = select(table)
+        if ordering is not None:
+            query = query.order_by(ordering.desc())
+        result = await self._session.execute(
+            query.limit(_PAGE_SIZE + 1).offset((page - 1) * _PAGE_SIZE)
+        )
+        mappings = list(result.mappings())
+        has_next = len(mappings) > _PAGE_SIZE
+        rows = [
+            AdminTableRow(
+                cells=[self._display_value(column, row[column]) for column in columns],
+                edit_url=self._edit_url(table_name, row),
+            )
+            for row in mappings[:_PAGE_SIZE]
+        ]
+        return AdminTablePage(
+            table=info,
+            columns=columns,
+            edit_column=_EDIT_URL_COLUMNS.get(table_name),
+            rows=rows,
+            page=page,
+            has_next=has_next,
+        )
+
+    @staticmethod
+    def _edit_url(table_name: str, row: Any) -> str | None:
+        """Return the restricted edit URL for one of the explicitly editable tables."""
+        key = _EDIT_URL_COLUMNS.get(table_name)
+        if key is None or row[key] is None:
+            return None
+        plural = "couriers" if table_name == "courier_profiles" else table_name
+        return f"/admin/{plural}/{row[key]}"
+
+    @staticmethod
+    def _display_value(column: str, value: object) -> str:
+        """Format a DB value for display while redacting sensitive columns."""
+        normalized = column.lower()
+        if normalized in _REDACTED_COLUMNS or any(
+            marker in normalized for marker in _REDACTED_MARKERS
+        ):
+            return "••••••"
+        if value is None:
+            return "—"
+        if isinstance(value, Enum):
+            return str(value.value)
+        if isinstance(value, (date, datetime, uuid.UUID, Decimal)):
+            return str(value)
+        if isinstance(value, (dict, list)):
+            return AdminReadRepository._truncate(json.dumps(value, default=str, ensure_ascii=False))
+        return AdminReadRepository._truncate(str(value))
+
+    @staticmethod
+    def _truncate(value: str, limit: int = 160) -> str:
+        """Keep browser cells compact without changing the underlying read query."""
+        return value if len(value) <= limit else f"{value[: limit - 1]}…"
 
     async def order_counts_by_status(self) -> dict[str, int]:
         """Return a map of order status -> count."""

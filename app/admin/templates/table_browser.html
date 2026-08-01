@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+{% if not data %}
+<h1>Table not found</h1>
+<p class="note">Choose a table from the <a href="/admin/tables">data catalog</a>.</p>
+{% else %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Application data / {{ data.table.name }}</p>
+    <h1>{{ data.table.label }}</h1>
+  </div>
+  <span class="table-card__mode {% if data.table.editable %}is-editable{% endif %}">
+    {% if data.table.editable %}Controlled edit{% else %}Read only{% endif %}
+  </span>
+</div>
+<p class="note">
+  Showing up to 50 records per page. Encrypted, credential, token, and personal-contact fields stay masked.
+  {% if data.table.editable %}Open a record link to edit only the safe fields for this table.{% endif %}
+</p>
+<div class="table-scroll">
+  <table class="list data-table">
+    <thead><tr>{% for column in data.columns %}<th>{{ column }}</th>{% endfor %}</tr></thead>
+    <tbody>{% for row in data.rows %}
+      <tr>{% for cell in row.cells %}<td>{% if data.columns[loop.index0] == data.edit_column and row.edit_url %}<a href="{{ row.edit_url }}">{{ cell }}</a>{% else %}{{ cell }}{% endif %}</td>{% endfor %}</tr>
+    {% else %}<tr><td colspan="{{ data.columns|length }}">No records.</td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+<div class="pager">
+  {% if data.page > 1 %}<a class="btn secondary" href="/admin/tables/{{ data.table.name }}?page={{ data.page - 1 }}">Previous</a>{% endif %}
+  <span>Page {{ data.page }}</span>
+  {% if data.has_next %}<a class="btn secondary" href="/admin/tables/{{ data.table.name }}?page={{ data.page + 1 }}">Next</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

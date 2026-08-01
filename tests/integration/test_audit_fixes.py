@@ -61,6 +61,7 @@ async def test_ban_revokes_live_access_and_refresh() -> None:
     from app.repositories.admin_read_repository import AdminReadRepository
     from app.repositories.audit_repository import AuditRepository
     from app.repositories.courier_repository import CourierRepository
+    from app.repositories.order_repository import OrderRepository
     from app.repositories.promo_repository import PromoRepository
     from app.repositories.user_repository import UserRepository
     from app.services.admin_service import AdminService
@@ -86,6 +87,7 @@ async def test_ban_revokes_live_access_and_refresh() -> None:
                     reads=AdminReadRepository(session),
                     users=UserRepository(session),
                     couriers=CourierRepository(session),
+                    orders=OrderRepository(session),
                     promos=PromoRepository(session),
                     audit=AuditRepository(session),
                     auth_repo=AuthRepository(session),

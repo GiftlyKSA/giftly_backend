@@ -8,7 +8,7 @@ is the backend, admin dashboard, and documentation — there is no mobile/web cl
 
 > Build status: **all 14 phases implemented and green.** Configuration and the
 > production safety interlock; the money/pricing/crypto engines; the full data layer
-> (22 tables, constraints, indexes, ledger/immutability triggers, system-wallet seed);
+> (23 application tables, constraints, indexes, ledger/immutability triggers, system-wallet seed);
 > the OTP→JWT auth API with refresh rotation; the double-entry ledger and wallet
 > endpoints; the promo engine with atomic reservation; orders with the courier radar
 > and geofenced delivery; itemised invoices and pricing; split wallet/gateway payments
@@ -179,6 +179,11 @@ test asserts it 404s there.
 Server-rendered (Jinja2), mounted at `/admin`, gated by `ADMIN_DASHBOARD_ENABLED`. It
 authenticates with environment-backed username/password into server-side sessions and
 calls the **same** services as the JSON API — it never queries the DB directly.
+
+`/admin/tables` provides a paginated, redacted view of every application table. Those
+views are read-only except for audited, step-up-protected user, courier-profile, and
+eligible order delivery-detail updates. See `docs/endpoints/admin.md` for the exact
+field-level boundary.
 
 ## Docs
 
