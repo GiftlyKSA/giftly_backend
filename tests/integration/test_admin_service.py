@@ -214,9 +214,7 @@ async def test_otp_service_request_verify_and_rate_limit(redis_client: Redis) ->
 
 async def test_admin_auth_session_and_logout(db_session: AsyncSession, redis_client: Redis) -> None:
     settings = _settings()
-    sms = FakeSmsClient(settings.ENVIRONMENT)
     auth = AdminAuthService(
-        otp=OtpService(redis_client, sms, settings),
         users=UserRepository(db_session),
         sessions=AdminSessionRepository(db_session),
         redis=redis_client,
@@ -231,3 +229,41 @@ async def test_admin_auth_session_and_logout(db_session: AsyncSession, redis_cli
     assert await auth.has_step_up(token_hash) is False
     assert auth.csrf_token_for(token_hash)
     await auth.logout("not-a-real-token")  # no-op, must not raise
+
+
+async def test_admin_password_login_is_throttled(
+    db_session: AsyncSession, redis_client: Redis
+) -> None:
+    username = f"throttle-{uuid.uuid4()}"
+    ip = "192.0.2.44"
+    settings = make_test_settings(
+        ADMIN_DASHBOARD_ENABLED=True,
+        ADMIN_USERNAME=username,
+        ADMIN_PASSWORD="correct-admin-password",
+    )
+    auth = AdminAuthService(
+        users=UserRepository(db_session),
+        sessions=AdminSessionRepository(db_session),
+        redis=redis_client,
+        settings=settings,
+    )
+    user_key = f"admin:login:user:{sha256_hex(username.casefold())}"
+    ip_key = f"admin:login:ip:{sha256_hex(ip)}"
+    try:
+        for _ in range(5):
+            with pytest.raises(UnauthorizedError):
+                await auth.complete_login(
+                    username=username,
+                    password="wrong",
+                    ip=ip,
+                    user_agent=None,
+                )
+        with pytest.raises(RateLimitedError):
+            await auth.complete_login(
+                username=username,
+                password="wrong",
+                ip=ip,
+                user_agent=None,
+            )
+    finally:
+        await redis_client.delete(user_key, ip_key)

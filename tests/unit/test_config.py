@@ -91,3 +91,28 @@ def test_invalid_withdrawal_range_refuses_boot() -> None:
             _env_file=None,
             **_base_env(MIN_WITHDRAWAL_AMOUNT="100.00", MAX_WITHDRAWAL_AMOUNT="50.00"),
         )
+
+
+def test_enabled_admin_dashboard_requires_credentials() -> None:
+    with pytest.raises(ValueError, match="ADMIN_USERNAME"):
+        Settings(  # type: ignore[call-arg]
+            _env_file=None,
+            **_base_env(
+                ADMIN_DASHBOARD_ENABLED="true",
+                ADMIN_SESSION_SECRET="s" * 40,
+            ),
+        )
+
+
+def test_production_rejects_development_admin_credentials() -> None:
+    with pytest.raises(ValueError, match="Production admin credentials"):
+        Settings(  # type: ignore[call-arg]
+            _env_file=None,
+            **_base_env(
+                ENVIRONMENT="production",
+                ADMIN_DASHBOARD_ENABLED="true",
+                ADMIN_USERNAME="admin",
+                ADMIN_PASSWORD="admin",
+                ADMIN_SESSION_SECRET="s" * 40,
+            ),
+        )

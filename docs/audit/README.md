@@ -1,4 +1,4 @@
-# SAFE-GIFT backend — full code audit (2026-07-31)
+# SAFE-GIFT backend — full code audit (2026-08-01)
 
 This folder is a fresh audit of the current tree after remediation. It replaces the
 2026-07-21 reports. Findings were verified against code, migrations, generated OpenAPI,
@@ -17,7 +17,7 @@ unless they still apply.
 - Gates: Ruff and format clean; strict mypy clean; Bandit clean; `pip-audit --strict`
   reports no known vulnerabilities; Alembic reports no application-model drift;
   Docker Compose config validates.
-- 230 tests passed in the full four-worker run. Coverage measured **87.82%**, above the
+- 233 tests passed in the full four-worker run. Coverage measured **87.90%**, above the
   85% CI gate.
 
 ## Remediation completed in this pass
@@ -28,6 +28,7 @@ unless they still apply.
 | Withdrawals | Complete request → approve/reject → paid flow; encrypted Saudi IBAN, held funds, row locks, audit rows, idempotency, and balanced ledger settlement. |
 | WebSocket guards | Ban check and rate limit now share one Redis Lua round trip and fail closed. |
 | Application lifecycle | Deprecated shutdown event replaced with FastAPI lifespan cleanup. |
+| Admin authentication | Environment-backed credentials, fail-closed attempt throttling, secure sessions, password step-up, and production rejection of development defaults. |
 | Chat durability | Message commits and recipient notification finish before Redis publishes the live event. |
 | Private media | Upload URL signs exact length and content type; CloudFront read URLs are RSA/SHA-256 signed; production storage config is fail-closed. |
 | Push fanout | Provider calls are bounded to 500 tokens per batch. |
@@ -47,8 +48,8 @@ unless they still apply.
 
 ## Accepted trade-offs
 
-- The ordinary HTTP rate limiter fails open on Redis failure; OTP and guarded WebSocket
-  paths fail closed.
+- The ordinary HTTP rate limiter fails open on Redis failure; OTP, admin authentication,
+  and guarded WebSocket paths fail closed.
 - Browser WebSocket authentication uses `?token=`; proxy/access logs must redact query
   strings until single-use WS tickets are introduced.
 - `statement_cache_size=0` remains enabled for PgBouncer transaction-mode safety.

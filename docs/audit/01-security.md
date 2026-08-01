@@ -1,4 +1,4 @@
-# Security audit (2026-07-31)
+# Security audit (2026-08-01)
 
 ## Verdict
 
@@ -19,6 +19,10 @@ verification (OPEN-1) and ownership-checked private-media delivery (OPEN-2).
   digits are returned.
 - OTP values are CSPRNG-generated and stored as keyed HMACs with bounded attempts,
   repaired TTLs, and block windows.
+- Dashboard credentials remain environment-only and are compared in constant time.
+  Attempts are throttled by hashed username and source IP, and Redis failure denies
+  authentication. Production rejects development defaults; sessions retain hashed
+  cookies, CSRF, audit attribution, and password step-up.
 - Ownership is enforced in repository queries; JSON admin money actions require an
   ADMIN JWT; dashboard mutations retain CSRF, strict cookies, and step-up controls.
 - Paylink webhooks check trusted peer IP, then constant-time HMAC over raw bytes, then

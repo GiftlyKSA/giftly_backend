@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import User
-from app.models.enums import UserStatus
+from app.models.enums import UserRole, UserStatus
+
+_DASHBOARD_ADMIN_NAMESPACE = uuid.UUID("48c72a54-78e4-4a0e-a20f-54378ed7f950")
 
 
 class UserRepository:
@@ -26,6 +30,29 @@ class UserRepository:
         """Return a user by exact phone, or None."""
         result: User | None = await self._session.scalar(select(User).where(User.phone == phone))
         return result
+
+    async def ensure_dashboard_admin(self, username: str) -> User | None:
+        """Return the stable DB actor used by environment-authenticated dashboard sessions.
+
+        The credential remains environment-only. A reserved internal user gives sessions,
+        foreign keys, and audit rows a durable actor without inventing a customer phone.
+        PostgreSQL's conflict handling keeps simultaneous first logins idempotent.
+        """
+        admin_id = uuid.uuid5(_DASHBOARD_ADMIN_NAMESPACE, username)
+        internal_phone = f"admin:{hashlib.sha256(username.encode()).hexdigest()[:14]}"
+        await self._session.execute(
+            insert(User)
+            .values(
+                id=admin_id,
+                phone=internal_phone,
+                full_name="Dashboard administrator",
+                role=UserRole.ADMIN,
+                status=UserStatus.ACTIVE,
+            )
+            .on_conflict_do_nothing()
+        )
+        await self._session.flush()
+        return await self.get(admin_id)
 
     async def set_status(self, user: User, status: UserStatus) -> None:
         """Update a user's account status (ban/unban)."""

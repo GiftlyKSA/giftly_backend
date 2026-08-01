@@ -27,7 +27,6 @@ from app.repositories.promo_repository import PromoRepository
 from app.repositories.user_repository import UserRepository
 from app.services.admin_auth_service import AdminAuthService
 from app.services.admin_service import AdminService
-from app.services.otp_service import OtpService
 
 SESSION_COOKIE = "admin_session"
 
@@ -77,13 +76,9 @@ async def get_db(request: Request) -> AsyncIterator[AsyncSession]:
             raise
 
 
-def build_auth_service(
-    db: AsyncSession, redis: Redis, settings: Settings, request: Request
-) -> AdminAuthService:
+def build_auth_service(db: AsyncSession, redis: Redis, settings: Settings) -> AdminAuthService:
     """Assemble the admin auth service for a request."""
-    otp = OtpService(redis, request.app.state.clients.sms, settings)
     return AdminAuthService(
-        otp=otp,
         users=UserRepository(db),
         sessions=AdminSessionRepository(db),
         redis=redis,
@@ -116,7 +111,7 @@ async def require_admin(request: Request, db: AsyncSession) -> AdminContext:
         raise AdminRedirect()
     settings = get_settings_from(request)
     redis = get_redis_from(request)
-    auth = build_auth_service(db, redis, settings, request)
+    auth = build_auth_service(db, redis, settings)
     try:
         session_row, admin = await auth.load_session(raw)
     except Exception as exc:  # noqa: BLE001 — any auth failure means "go log in".

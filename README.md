@@ -97,6 +97,7 @@ at runtime (task definition / compose override / systemd `EnvironmentFile`). See
 | `SNDR_*` | production | email api key/base url/from/template | — |
 | `AWS_*`, `S3_BUCKET_NAME`, `CLOUDFRONT_*` | production | storage + signed CDN | — |
 | `ADMIN_SESSION_SECRET` | if dashboard on | >= 32 bytes | `<32+ random bytes>` |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | if dashboard on | environment-backed login; production password >= 12 chars | `admin` / `admin` (development only) |
 
 The application **refuses to boot** if any production-safety rule is violated (DEBUG on,
 docs enabled, empty/wildcard CORS, missing Paylink/sndr config, a bad encryption key, or
@@ -176,7 +177,7 @@ test asserts it 404s there.
 ## Admin dashboard
 
 Server-rendered (Jinja2), mounted at `/admin`, gated by `ADMIN_DASHBOARD_ENABLED`. It
-authenticates with phone + OTP into server-side sessions (cookies, CSRF-protected) and
+authenticates with environment-backed username/password into server-side sessions and
 calls the **same** services as the JSON API — it never queries the DB directly.
 
 ## Docs

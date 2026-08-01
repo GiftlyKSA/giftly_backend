@@ -1,4 +1,4 @@
-# Logic and correctness audit (2026-07-31)
+# Logic and correctness audit (2026-08-01)
 
 ## Verdict
 
@@ -42,8 +42,8 @@ where an existing order/conversation query proves access; never add a generic ke
 
 ## Test evidence
 
-- 230 tests collected.
-- 85 unit tests pass.
-- All 145 integration tests pass against PostgreSQL 16/PostGIS and password-protected
+- 233 tests collected.
+- 87 unit tests pass.
+- All 146 integration tests pass against PostgreSQL 16/PostGIS and password-protected
   Redis.
-- The complete 230-test, four-worker run passes with 87.82% coverage.
+- The complete 233-test, four-worker run passes with 87.90% coverage.

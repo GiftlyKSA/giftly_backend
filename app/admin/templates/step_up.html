@@ -2,13 +2,14 @@
 {% block content %}
 <section class="card narrow">
   <h1>Step-up verification</h1>
-  <p>Enter the code sent to your phone to authorise this sensitive action.</p>
+  <p>Re-enter the admin password to authorise this sensitive action.</p>
   <form method="post" action="/admin/step-up">
     <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
     <input type="hidden" name="next" value="{{ next_url }}">
-    <label>Code<input name="otp" inputmode="numeric" required></label>
+    <label>Password
+      <input name="password" type="password" autocomplete="current-password" required autofocus>
+    </label>
     <button type="submit">Confirm</button>
   </form>
-  {% if dev_code %}<p class="dev">Development OTP: <code>{{ dev_code }}</code></p>{% endif %}
 </section>
 {% endblock %}

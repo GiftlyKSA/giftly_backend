@@ -1,4 +1,4 @@
-"""End-to-end admin dashboard tests: OTP login, session, CSRF, step-up, audit.
+"""End-to-end admin dashboard tests: password login, session, CSRF, step-up, audit.
 
 Exercises the real session cookie, CSRF verification, step-up gating, and audit
 logging against the migrated database and a real Redis, all on one event loop via
@@ -7,6 +7,7 @@ httpx's ASGI transport. Skips if either backing service is unavailable.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import secrets as _secrets
 
@@ -16,18 +17,22 @@ from app.core.db import build_engine, build_session_factory
 from app.core.security import make_csrf_token, sha256_hex
 from app.main import create_app
 from app.models import AdminSession, AuditLog, Promo, User
-from app.models.enums import UserRole, UserStatus
+from app.models.enums import UserRole
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select
 
 from tests.conftest import make_test_settings
 
 _ADMIN_SECRET = "test-admin-session-secret-not-real-00000"
+_ADMIN_USERNAME = f"admin-test-{_secrets.token_hex(6)}"
+_ADMIN_PASSWORD = "test-admin-password"
 
 
 def _settings() -> Settings:
     overrides: dict[str, object] = {
         "ADMIN_DASHBOARD_ENABLED": True,
+        "ADMIN_USERNAME": _ADMIN_USERNAME,
+        "ADMIN_PASSWORD": _ADMIN_PASSWORD,
         "ADMIN_SESSION_SECRET": _ADMIN_SECRET,
     }
     if os.environ.get("DATABASE_URL"):
@@ -37,21 +42,15 @@ def _settings() -> Settings:
     return make_test_settings(**overrides)
 
 
-async def _seed_admin(factory: object, phone: str) -> None:
-    async with factory() as session:  # type: ignore[operator]
-        session.add(User(phone=phone, role=UserRole.ADMIN, status=UserStatus.ACTIVE))
-        await session.commit()
-
-
 async def test_admin_full_flow() -> None:
     settings = _settings()
     engine = build_engine(settings)
     factory = build_session_factory(engine)
-    phone = f"+96650{_secrets.randbelow(10_000_000):07d}"
     code = f"ADMTEST{_secrets.randbelow(100000)}"
 
     try:
-        await _seed_admin(factory, phone)
+        async with factory() as session:
+            await session.execute(select(User.id).limit(1))
     except Exception as exc:  # noqa: BLE001 — no DB available; skip.
         await engine.dispose()
         pytest.skip(f"database unavailable: {exc}")
@@ -60,13 +59,19 @@ async def test_admin_full_flow() -> None:
     transport = ASGITransport(app=app)
     try:
         async with AsyncClient(transport=transport, base_url="http://t") as client:
-            # 1. Request the login OTP; the FakeSmsClient captures it.
-            await client.post("/admin/login", data={"phone": phone})
-            otp = app.state.clients.sms.last_otp[phone]
+            # 1. Invalid credentials fail generically and create no session.
+            denied = await client.post(
+                "/admin/login", data={"username": _ADMIN_USERNAME, "password": "wrong"}
+            )
+            assert denied.status_code == 401
+            assert client.cookies.get("admin_session") is None
 
-            # 2. Verify -> session cookie set, redirected to the overview.
-            resp = await client.post("/admin/login/verify", data={"phone": phone, "otp": otp})
-            assert resp.status_code == 303
+            # 2. Valid environment credentials create the session and DB audit actor.
+            response = await client.post(
+                "/admin/login",
+                data={"username": _ADMIN_USERNAME, "password": _ADMIN_PASSWORD},
+            )
+            assert response.status_code == 303
             cookie = client.cookies.get("admin_session")
             assert cookie
 
@@ -101,12 +106,15 @@ async def test_admin_full_flow() -> None:
             )
             assert no_stepup.status_code == 403
 
-            # 6. Perform step-up (fresh OTP), then create the promo.
+            # 6. Perform password step-up, then create the promo.
             await client.post("/admin/step-up/request", data={"next": "/admin/promos/new"})
-            step_otp = app.state.clients.sms.last_otp[phone]
             step = await client.post(
                 "/admin/step-up",
-                data={"otp": step_otp, "next": "/admin/promos/new", "csrf_token": csrf},
+                data={
+                    "password": _ADMIN_PASSWORD,
+                    "next": "/admin/promos/new",
+                    "csrf_token": csrf,
+                },
             )
             assert step.status_code == 303
 
@@ -137,7 +145,13 @@ async def test_admin_full_flow() -> None:
             assert audit is not None
     finally:
         async with factory() as session:
-            admin = await session.scalar(select(User).where(User.phone == phone))
+            internal_phone = f"admin:{hashlib.sha256(_ADMIN_USERNAME.encode()).hexdigest()[:14]}"
+            admin = await session.scalar(
+                select(User).where(
+                    User.phone == internal_phone,
+                    User.role == UserRole.ADMIN,
+                )
+            )
             if admin is not None:
                 await session.execute(delete(AuditLog).where(AuditLog.actor_user_id == admin.id))
                 await session.execute(

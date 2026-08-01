@@ -1,4 +1,4 @@
-# Guidelines compliance audit (2026-07-31)
+# Guidelines compliance audit (2026-08-01)
 
 `CLAUDE.md` was checked rule by rule against the remediated tree.
 
@@ -22,7 +22,7 @@
 | Conventional commits | Pass | Reviewed recent history; final change uses a conventional commit. |
 | Google docstrings and formatting | Pass | Ruff and format checks clean. |
 | Docs follow contract changes | Pass | Endpoint docs and generated OpenAPI include withdrawals and headers. |
-| Tests for behavior changes | Pass | 230 tests, 87.82% coverage; new race, storage, withdrawal, push, and guard tests. |
+| Tests for behavior changes | Pass | 233 tests, 87.90% coverage; race, storage, withdrawal, push, guard, and admin credential tests. |
 | No committed secrets or `.env` | Pass | Git ignore plus history/diff review; only explicit development/test values. |
 | Naming conventions | Pass | Plural tables, UUID PKs, money/encrypted suffixes, indexed migration. |
 | Production fake interlock | Pass | Boot validation plus fake constructors fail closed. |

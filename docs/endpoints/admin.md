@@ -6,12 +6,15 @@ same services as the rest of the backend — it never queries the database direc
 
 ## Authentication
 
-- `GET  /admin/login` — phone entry form.
-- `POST /admin/login` — sends an OTP (identical response whether or not the phone is an
-  admin; no enumeration). In development the OTP is shown on the page.
-- `POST /admin/login/verify` — verifies the OTP; only a `role=ADMIN`, `status=ACTIVE`
-  user completes. Sets an `admin_session` cookie: `HttpOnly`, `Secure` (production),
-  `SameSite=Strict`, `Path=/admin`. The DB stores only the SHA-256 of the cookie value.
+- `GET  /admin/login` — username/password entry form.
+- `POST /admin/login` — verifies `ADMIN_USERNAME` and `ADMIN_PASSWORD` using
+  constant-time comparisons. Attempts are throttled by both username and source IP.
+  The development Compose defaults are `admin` / `admin`; production refuses those
+  defaults and requires a password of at least 12 characters.
+- A successful login creates or reuses one reserved internal `ADMIN` user solely for
+  database foreign keys and audit attribution. Credentials remain environment-only.
+- The `admin_session` cookie is `HttpOnly`, `Secure` in production, `SameSite=Strict`,
+  and scoped to `Path=/admin`. The DB stores only the SHA-256 of the cookie value.
 - `POST /admin/logout` — revokes the session and clears the cookie.
 
 Sessions slide up to an absolute 12-hour cap. Unauthenticated access to any page
@@ -23,11 +26,12 @@ Because the dashboard uses cookies, **every state-changing form carries a CSRF t
 (a per-session HMAC), verified with `compare_digest`; a bad token returns 403.
 `SameSite=Strict` is a second layer.
 
-**Step-up re-authentication** (a fresh OTP, valid ~5 minutes) is required before:
+**Step-up re-authentication** (password confirmation, valid ~5 minutes) is required before:
 revealing an identity document or IBAN, creating/activating/deactivating a promo,
 verifying a courier, and banning/unbanning a user.
-- `POST /admin/step-up/request` — sends a fresh OTP to the admin's own phone.
-- `POST /admin/step-up` — verifies it and opens the step-up window.
+
+- `POST /admin/step-up/request` — shows the password confirmation form.
+- `POST /admin/step-up` — verifies the password and opens the step-up window.
 
 ## Pages
 

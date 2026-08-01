@@ -2,18 +2,15 @@
 {% block content %}
 <section class="card narrow">
   <h1>Admin sign in</h1>
-  {% if stage == "phone" %}
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
   <form method="post" action="/admin/login">
-    <label>Phone<input name="phone" type="tel" placeholder="+9665........" required></label>
-    <button type="submit">Send code</button>
+    <label>Username
+      <input name="username" type="text" autocomplete="username" value="{{ username or '' }}" required autofocus>
+    </label>
+    <label>Password
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <button type="submit">Sign in</button>
   </form>
-  {% else %}
-  <form method="post" action="/admin/login/verify">
-    <input type="hidden" name="phone" value="{{ phone }}">
-    <label>Code<input name="otp" inputmode="numeric" autocomplete="one-time-code" required></label>
-    <button type="submit">Verify</button>
-  </form>
-  {% if dev_code %}<p class="dev">Development OTP: <code>{{ dev_code }}</code></p>{% endif %}
-  {% endif %}
 </section>
 {% endblock %}

@@ -14,7 +14,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +31,7 @@ from app.admin.deps import (
     require_step_up,
     verify_csrf,
 )
+from app.core.exceptions import RateLimitedError, UnauthorizedError
 from app.models.enums import PromoDiscountType
 
 router = APIRouter(prefix="/admin", tags=["admin"], include_in_schema=False)
@@ -40,9 +41,13 @@ _TEMPLATES = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 DbDep = Annotated[AsyncSession, Depends(get_db)]
 
 
-def _render(request: Request, template: str, **context: object) -> HTMLResponse:
+def _render(
+    request: Request, template: str, *, status_code: int = 200, **context: object
+) -> HTMLResponse:
     """Render a template with the request bound."""
-    return _TEMPLATES.TemplateResponse(request, template, {"request": request, **context})
+    return _TEMPLATES.TemplateResponse(
+        request, template, {"request": request, **context}, status_code=status_code
+    )
 
 
 async def _ctx(request: Request, db: AsyncSession) -> AdminContext:
@@ -54,40 +59,39 @@ async def _ctx(request: Request, db: AsyncSession) -> AdminContext:
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request) -> HTMLResponse:
-    """Show the admin login form (phone entry)."""
-    return _render(request, "login.html", stage="phone")
+    """Show the admin username/password login form."""
+    return _render(request, "login.html")
 
 
 @router.post("/login", response_class=HTMLResponse)
-async def login_request_otp(
-    request: Request, db: DbDep, phone: Annotated[str, Form()]
-) -> HTMLResponse:
-    """Send a login OTP and show the code-entry stage."""
-    auth = build_auth_service(db, get_redis_from(request), get_settings_from(request), request)
-    dev_code = await auth.request_login_otp(phone)
-    return _render(request, "login.html", stage="otp", phone=phone, dev_code=dev_code)
-
-
-@router.post("/login/verify")
-async def login_verify(
+async def login(
     request: Request,
     db: DbDep,
-    phone: Annotated[str, Form()],
-    otp: Annotated[str, Form()],
-) -> RedirectResponse:
-    """Complete login: create a session and set the cookie."""
+    username: Annotated[str, Form(min_length=1, max_length=128)],
+    password: Annotated[str, Form(min_length=1, max_length=1024)],
+) -> Response:
+    """Verify environment credentials, create a session, and set its cookie."""
     settings = get_settings_from(request)
-    auth = build_auth_service(db, get_redis_from(request), settings, request)
-    login = await auth.complete_login(
-        phone=phone,
-        code=otp,
-        ip=client_ip(request),
-        user_agent=request.headers.get("user-agent", "")[:255] or None,
-    )
+    auth = build_auth_service(db, get_redis_from(request), settings)
+    try:
+        result = await auth.complete_login(
+            username=username,
+            password=password,
+            ip=client_ip(request),
+            user_agent=request.headers.get("user-agent", "")[:255] or None,
+        )
+    except (UnauthorizedError, RateLimitedError) as exc:
+        return _render(
+            request,
+            "login.html",
+            status_code=exc.status_code,
+            username=username,
+            error=exc.message,
+        )
     response = RedirectResponse("/admin", status_code=303)
     response.set_cookie(
         SESSION_COOKIE,
-        login.raw_session_token,
+        result.raw_session_token,
         httponly=True,
         secure=settings.is_production,
         samesite="strict",
@@ -102,7 +106,7 @@ async def logout(request: Request, db: DbDep) -> RedirectResponse:
     """Revoke the current session and clear the cookie."""
     raw = request.cookies.get(SESSION_COOKIE)
     if raw:
-        auth = build_auth_service(db, get_redis_from(request), get_settings_from(request), request)
+        auth = build_auth_service(db, get_redis_from(request), get_settings_from(request))
         await auth.logout(raw)
     response = RedirectResponse("/admin/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE, path="/admin")
@@ -116,17 +120,16 @@ async def logout(request: Request, db: DbDep) -> RedirectResponse:
 async def step_up_request(
     request: Request, db: DbDep, next_url: Annotated[str, Form(alias="next")]
 ) -> HTMLResponse:
-    """Send a step-up OTP to the current admin's phone and show the entry form."""
+    """Show password confirmation for a sensitive admin action."""
     ctx = await _ctx(request, db)
-    dev_code = await ctx.auth.request_login_otp(ctx.admin.phone)
-    return _render(request, "step_up.html", ctx=ctx, next_url=next_url, dev_code=dev_code)
+    return _render(request, "step_up.html", ctx=ctx, next_url=next_url)
 
 
 @router.post("/step-up")
 async def step_up_verify(
     request: Request,
     db: DbDep,
-    otp: Annotated[str, Form()],
+    password: Annotated[str, Form(min_length=1, max_length=1024)],
     next_url: Annotated[str, Form(alias="next")],
     csrf_token: Annotated[str, Form()],
 ) -> RedirectResponse:
@@ -134,7 +137,9 @@ async def step_up_verify(
     ctx = await _ctx(request, db)
     verify_csrf(ctx, csrf_token, get_settings_from(request))
     await ctx.auth.grant_step_up(
-        phone=ctx.admin.phone, code=otp, session_token_hash=ctx.session_row.session_token_hash
+        password=password,
+        session_token_hash=ctx.session_row.session_token_hash,
+        ip=client_ip(request),
     )
     target = next_url if next_url.startswith("/admin") else "/admin"
     return RedirectResponse(target, status_code=303)

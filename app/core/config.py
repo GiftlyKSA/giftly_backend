@@ -91,6 +91,8 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_KEY: SecretStr | None = None
 
     # Admin dashboard
+    ADMIN_USERNAME: str | None = None
+    ADMIN_PASSWORD: SecretStr | None = None
     ADMIN_SESSION_SECRET: SecretStr | None = None
     ADMIN_SESSION_TTL_MINUTES: int = 60
     ADMIN_DASHBOARD_ENABLED: bool = False
@@ -212,10 +214,25 @@ class Settings(BaseSettings):
 
     def _validate_admin(self) -> None:
         if self.ADMIN_DASHBOARD_ENABLED:
+            if not self.ADMIN_USERNAME or self.ADMIN_PASSWORD is None:
+                raise ValueError(
+                    "ADMIN_USERNAME and ADMIN_PASSWORD are required when the dashboard is on."
+                )
+            password = self.ADMIN_PASSWORD.get_secret_value()
+            if not password:
+                raise ValueError("ADMIN_PASSWORD must not be empty.")
             if self.ADMIN_SESSION_SECRET is None:
                 raise ValueError("ADMIN_SESSION_SECRET is required when the dashboard is on.")
             if len(self.ADMIN_SESSION_SECRET.get_secret_value().encode("utf-8")) < 32:
                 raise ValueError("ADMIN_SESSION_SECRET must be at least 32 bytes.")
+            uses_development_default = (
+                self.ADMIN_USERNAME == "admin" and password == self.ADMIN_USERNAME
+            )
+            if self.is_production and (uses_development_default or len(password) < 12):
+                raise ValueError(
+                    "Production admin credentials must not use defaults and the password must be "
+                    "at least 12 characters."
+                )
 
     def _validate_production_interlock(self) -> None:
         if self.DEBUG:
