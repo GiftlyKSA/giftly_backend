@@ -19,8 +19,9 @@ from redis.asyncio import Redis
 from app.core.config import Settings
 from app.core.crypto import build_aad, build_cipher
 from app.core.exceptions import ConflictError, NotFoundError, ValidationDomainError
-from app.models import CourierProfile, Withdrawal
-from app.models.enums import OrderStatus, UserStatus
+from app.core.security import hmac_hex
+from app.models import CourierProfile, User, Withdrawal
+from app.models.enums import OrderStatus, UserRole, UserStatus
 from app.repositories.admin_read_repository import (
     AdminReadRepository,
     AdminTableInfo,
@@ -285,19 +286,77 @@ class AdminService:
         full_name: str | None,
         email: str | None,
         ip: str | None,
+        phone: str | None = None,
     ) -> None:
-        """Update a user's display name/email without changing role or credentials."""
+        """Update a user's dashboard-managed profile fields without changing their role."""
         user = await self._users.get(user_id)
         if user is None:
             raise NotFoundError("User not found.")
+        if phone:
+            owner = await self._users.get_by_phone(phone)
+            if owner is not None and owner.id != user_id:
+                raise ConflictError("That phone number is already used by another user.")
         if email:
             owner = await self._users.get_by_email(email)
             if owner is not None and owner.id != user_id:
                 raise ConflictError("That email is already used by another user.")
-        await self._users.update_admin_profile(user, full_name=full_name, email=email)
+        await self._users.update_admin_profile(user, phone=phone, full_name=full_name, email=email)
         await self._audit.record(
             actor_user_id=admin_id,
             action="USER_PROFILE_UPDATE",
+            entity_type="users",
+            entity_id=user_id,
+            ip_address=ip,
+        )
+
+    async def create_user(
+        self,
+        *,
+        admin_id: uuid.UUID,
+        phone: str,
+        full_name: str | None,
+        email: str | None,
+        role: UserRole,
+        ip: str | None,
+    ) -> User:
+        """Create a customer or courier account and record the administrator action."""
+        if role is UserRole.ADMIN:
+            raise ValidationDomainError("Dashboard administrator accounts are environment-managed.")
+        if not phone:
+            raise ValidationDomainError("Phone is required.")
+        if await self._users.get_by_phone(phone) is not None:
+            raise ConflictError("That phone number is already used by another user.")
+        if email and await self._users.get_by_email(email) is not None:
+            raise ConflictError("That email is already used by another user.")
+        user = await self._users.create_admin_user(
+            phone=phone, full_name=full_name, email=email, role=role
+        )
+        await self._audit.record(
+            actor_user_id=admin_id,
+            action="USER_CREATE",
+            entity_type="users",
+            entity_id=user.id,
+            ip_address=ip,
+        )
+        return user
+
+    async def delete_user(self, *, admin_id: uuid.UUID, user_id: uuid.UUID, ip: str | None) -> None:
+        """Soft-delete a user and revoke access without erasing financial history."""
+        user = await self._users.get(user_id)
+        if user is None:
+            raise NotFoundError("User not found.")
+        if user.role is UserRole.ADMIN:
+            raise ValidationDomainError("Dashboard administrator accounts are environment-managed.")
+        await self._users.soft_delete(user)
+        await self._auth_repo.revoke_all_for_user(user_id, self._now())
+        await self._redis.set(
+            f"auth:banned:{user_id}",
+            "1",
+            ex=self._settings.JWT_ACCESS_TTL_MINUTES * 60 + 60,
+        )
+        await self._audit.record(
+            actor_user_id=admin_id,
+            action="USER_DELETE",
             entity_type="users",
             entity_id=user_id,
             ip_address=ip,
@@ -326,6 +385,139 @@ class AdminService:
             action="COURIER_PROFILE_UPDATE",
             entity_type="courier_profiles",
             entity_id=courier_user_id,
+            ip_address=ip,
+        )
+
+    async def create_courier_profile(
+        self,
+        *,
+        admin_id: uuid.UUID,
+        user_id: uuid.UUID,
+        city_of_residence: str,
+        bio: str | None,
+        identity_document: str,
+        identity_type: str,
+        ip: str | None,
+    ) -> CourierProfile:
+        """Create a profile for an existing courier user with encrypted identity data."""
+        user = await self._users.get(user_id)
+        if user is None or user.role is not UserRole.COURIER:
+            raise ValidationDomainError("Courier profiles require an existing courier user.")
+        if await self._couriers.get(user_id) is not None:
+            raise ConflictError("That courier already has a profile.")
+        if not city_of_residence:
+            raise ValidationDomainError("City is required.")
+        if not identity_document:
+            raise ValidationDomainError("A national ID or passport is required.")
+        if identity_type not in {"national_id", "passport_id"}:
+            raise ValidationDomainError("Identity document type is invalid.")
+        fingerprint = hmac_hex(
+            identity_document, self._settings.IDENTITY_FINGERPRINT_PEPPER.get_secret_value()
+        )
+        if await self._couriers.fingerprint_exists(fingerprint):
+            raise ConflictError("This identity document is already registered.")
+        cipher = build_cipher(
+            self._settings.encryption_keys(), self._settings.FIELD_ENCRYPTION_KEY_VERSION
+        )
+        aad_column = "national_id" if identity_type == "national_id" else "passport_id"
+        encrypted = cipher.encrypt(
+            identity_document, build_aad("courier_profiles", aad_column, str(user_id))
+        )
+        profile = await self._couriers.create_admin_profile(
+            user_id=user_id,
+            city_of_residence=city_of_residence,
+            bio=bio,
+            national_id_encrypted=encrypted if identity_type == "national_id" else None,
+            passport_id_encrypted=encrypted if identity_type == "passport_id" else None,
+            identity_fingerprint=fingerprint,
+        )
+        await self._audit.record(
+            actor_user_id=admin_id,
+            action="COURIER_PROFILE_CREATE",
+            entity_type="courier_profiles",
+            entity_id=user_id,
+            ip_address=ip,
+        )
+        return profile
+
+    async def delete_courier_profile(
+        self, *, admin_id: uuid.UUID, user_id: uuid.UUID, ip: str | None
+    ) -> None:
+        """Delete a courier profile while retaining the user and their ledger history."""
+        profile = await self._couriers.get(user_id)
+        if profile is None:
+            raise NotFoundError("Courier profile not found.")
+        await self._couriers.delete(profile)
+        await self._audit.record(
+            actor_user_id=admin_id,
+            action="COURIER_PROFILE_DELETE",
+            entity_type="courier_profiles",
+            entity_id=user_id,
+            ip_address=ip,
+        )
+
+    async def create_order(
+        self,
+        *,
+        admin_id: uuid.UUID,
+        customer_id: uuid.UUID,
+        description: str | None,
+        delivery_city: str,
+        delivery_date: date,
+        longitude: float,
+        latitude: float,
+        delivery_address_note: str | None,
+        ip: str | None,
+    ) -> uuid.UUID:
+        """Create a NEW order for an active customer and audit its origin."""
+        customer = await self._users.get(customer_id)
+        if (
+            customer is None
+            or customer.role is not UserRole.CUSTOMER
+            or customer.status is not UserStatus.ACTIVE
+            or customer.deleted_at is not None
+        ):
+            raise ValidationDomainError("Orders require an active customer user.")
+        if not delivery_city:
+            raise ValidationDomainError("Delivery city is required.")
+        today = date.today()
+        if not today <= delivery_date <= today + timedelta(days=180):
+            raise ValidationDomainError("Delivery date must be within the next 180 days.")
+        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+            raise ValidationDomainError("Delivery coordinates are invalid.")
+        order = await self._orders.create(
+            customer_id=customer_id,
+            description=description,
+            delivery_city=delivery_city,
+            longitude=longitude,
+            latitude=latitude,
+            delivery_date=delivery_date,
+            address_note=delivery_address_note,
+        )
+        await self._audit.record(
+            actor_user_id=admin_id,
+            action="ORDER_CREATE",
+            entity_type="orders",
+            entity_id=order.id,
+            ip_address=ip,
+        )
+        return order.id
+
+    async def delete_order(
+        self, *, admin_id: uuid.UUID, order_id: uuid.UUID, ip: str | None
+    ) -> None:
+        """Permanently delete a NEW order before assignment, billing, or delivery."""
+        order = await self._orders.lock(order_id)
+        if order is None:
+            raise NotFoundError("Order not found.")
+        if order.status is not OrderStatus.NEW:
+            raise ConflictError("Only unassigned NEW orders may be permanently deleted.")
+        await self._orders.delete(order)
+        await self._audit.record(
+            actor_user_id=admin_id,
+            action="ORDER_DELETE",
+            entity_type="orders",
+            entity_id=order_id,
             ip_address=ip,
         )
 

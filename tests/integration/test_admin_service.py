@@ -225,6 +225,71 @@ async def test_ban_and_controlled_table_edits(
     assert order.description == "Updated"
 
 
+async def test_admin_crud_for_users_profiles_and_new_orders(
+    db_session: AsyncSession, redis_client: Redis
+) -> None:
+    """Dashboard CRUD is audited and preserves non-draft financial history."""
+    service = _admin_service(db_session, _settings(), redis_client)
+    admin = await _admin(db_session)
+    phone = f"+96650{uuid.uuid4().int % 10_000_000:07d}"
+    customer = await service.create_user(
+        admin_id=admin.id,
+        phone=phone,
+        full_name="Created customer",
+        email="created@example.test",
+        role=UserRole.CUSTOMER,
+        ip=None,
+    )
+    await service.update_user_profile(
+        admin_id=admin.id,
+        user_id=customer.id,
+        phone=f"+96651{uuid.uuid4().int % 10_000_000:07d}",
+        full_name="Edited customer",
+        email="edited@example.test",
+        ip=None,
+    )
+    assert customer.full_name == "Edited customer"
+
+    courier = await service.create_user(
+        admin_id=admin.id,
+        phone=f"+96652{uuid.uuid4().int % 10_000_000:07d}",
+        full_name="Created courier",
+        email=None,
+        role=UserRole.COURIER,
+        ip=None,
+    )
+    profile = await service.create_courier_profile(
+        admin_id=admin.id,
+        user_id=courier.id,
+        city_of_residence="Jeddah",
+        bio="New profile",
+        identity_document="1234567890",
+        identity_type="national_id",
+        ip=None,
+    )
+    assert profile.user_id == courier.id
+    await service.delete_courier_profile(admin_id=admin.id, user_id=courier.id, ip=None)
+    assert await service.get_courier(courier.id) is None
+
+    order_id = await service.create_order(
+        admin_id=admin.id,
+        customer_id=customer.id,
+        description="Admin-created order",
+        delivery_city="Jeddah",
+        delivery_date=date.today() + timedelta(days=2),
+        longitude=39.2,
+        latitude=21.5,
+        delivery_address_note="Reception",
+        ip=None,
+    )
+    await service.delete_order(admin_id=admin.id, order_id=order_id, ip=None)
+    assert await service.get_order(order_id) is None
+
+    await service.delete_user(admin_id=admin.id, user_id=customer.id, ip=None)
+    deleted = await service.get_user(customer.id)
+    assert deleted is not None and deleted.deleted_at is not None
+
+
 async def test_otp_service_request_verify_and_rate_limit(redis_client: Redis) -> None:
     settings = _settings()
     sms = FakeSmsClient(settings.ENVIRONMENT)

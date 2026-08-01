@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Couriers pending verification</h1>
+<p><a class="btn" href="/admin/couriers/new">Add courier profile</a></p>
 <table class="list">
   <thead><tr><th>User</th><th>City</th><th>Created</th></tr></thead>
   <tbody>{% for p in pending %}

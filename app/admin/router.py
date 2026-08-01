@@ -32,6 +32,7 @@ from app.admin.deps import (
     verify_csrf,
 )
 from app.core.exceptions import RateLimitedError, UnauthorizedError
+from app.models.enums import UserRole
 
 router = APIRouter(prefix="/admin", tags=["admin"], include_in_schema=False)
 
@@ -182,6 +183,39 @@ async def table_browser(
 # --- Couriers ----------------------------------------------------------------
 
 
+@router.get("/couriers/new", response_class=HTMLResponse)
+async def courier_new(request: Request, db: DbDep) -> HTMLResponse:
+    """Show the courier-profile creation form."""
+    ctx = await _ctx(request, db)
+    return _render(request, "courier_new.html", ctx=ctx)
+
+
+@router.post("/couriers")
+async def courier_create(
+    request: Request,
+    db: DbDep,
+    csrf_token: Annotated[str, Form()],
+    user_id: Annotated[uuid.UUID, Form()],
+    city_of_residence: Annotated[str, Form(min_length=1, max_length=100)],
+    identity_type: Annotated[str, Form()],
+    identity_document: Annotated[str, Form(min_length=1, max_length=100)],
+    bio: Annotated[str, Form(max_length=1000)] = "",
+) -> RedirectResponse:
+    """Create a profile for an existing courier user."""
+    ctx = await _ctx(request, db)
+    verify_csrf(ctx, csrf_token, get_settings_from(request))
+    profile = await ctx.service.create_courier_profile(
+        admin_id=ctx.admin.id,
+        user_id=user_id,
+        city_of_residence=city_of_residence.strip(),
+        bio=bio.strip() or None,
+        identity_type=identity_type,
+        identity_document=identity_document.strip(),
+        ip=client_ip(request),
+    )
+    return RedirectResponse(f"/admin/couriers/{profile.user_id}", status_code=303)
+
+
 @router.get("/couriers", response_class=HTMLResponse)
 async def couriers(request: Request, db: DbDep) -> HTMLResponse:
     """List couriers pending verification."""
@@ -276,7 +310,60 @@ async def courier_edit(
     return RedirectResponse(f"/admin/couriers/{courier_id}", status_code=303)
 
 
+@router.post("/couriers/{courier_id}/delete")
+async def courier_delete(
+    request: Request,
+    db: DbDep,
+    courier_id: uuid.UUID,
+    csrf_token: Annotated[str, Form()],
+) -> RedirectResponse:
+    """Delete a courier profile while retaining the underlying user record."""
+    ctx = await _ctx(request, db)
+    verify_csrf(ctx, csrf_token, get_settings_from(request))
+    await ctx.service.delete_courier_profile(
+        admin_id=ctx.admin.id, user_id=courier_id, ip=client_ip(request)
+    )
+    return RedirectResponse("/admin/tables/courier_profiles", status_code=303)
+
+
 # --- Orders / invoices -------------------------------------------------------
+
+
+@router.get("/orders/new", response_class=HTMLResponse)
+async def order_new(request: Request, db: DbDep) -> HTMLResponse:
+    """Show the form for an administrator-created NEW order."""
+    ctx = await _ctx(request, db)
+    return _render(request, "order_new.html", ctx=ctx, today=date.today().isoformat())
+
+
+@router.post("/orders")
+async def order_create(
+    request: Request,
+    db: DbDep,
+    csrf_token: Annotated[str, Form()],
+    customer_id: Annotated[uuid.UUID, Form()],
+    delivery_city: Annotated[str, Form(min_length=1, max_length=100)],
+    delivery_date: Annotated[date, Form()],
+    longitude: Annotated[float, Form()],
+    latitude: Annotated[float, Form()],
+    description: Annotated[str, Form(max_length=5000)] = "",
+    delivery_address_note: Annotated[str, Form(max_length=255)] = "",
+) -> RedirectResponse:
+    """Create a NEW order on behalf of an active customer."""
+    ctx = await _ctx(request, db)
+    verify_csrf(ctx, csrf_token, get_settings_from(request))
+    order_id = await ctx.service.create_order(
+        admin_id=ctx.admin.id,
+        customer_id=customer_id,
+        description=description.strip() or None,
+        delivery_city=delivery_city.strip(),
+        delivery_date=delivery_date,
+        longitude=longitude,
+        latitude=latitude,
+        delivery_address_note=delivery_address_note.strip() or None,
+        ip=client_ip(request),
+    )
+    return RedirectResponse(f"/admin/orders/{order_id}", status_code=303)
 
 
 @router.get("/orders", response_class=HTMLResponse)
@@ -326,6 +413,20 @@ async def order_edit(
         ip=client_ip(request),
     )
     return RedirectResponse(f"/admin/orders/{order_id}", status_code=303)
+
+
+@router.post("/orders/{order_id}/delete")
+async def order_delete(
+    request: Request,
+    db: DbDep,
+    order_id: uuid.UUID,
+    csrf_token: Annotated[str, Form()],
+) -> RedirectResponse:
+    """Permanently delete an unassigned NEW order."""
+    ctx = await _ctx(request, db)
+    verify_csrf(ctx, csrf_token, get_settings_from(request))
+    await ctx.service.delete_order(admin_id=ctx.admin.id, order_id=order_id, ip=client_ip(request))
+    return RedirectResponse("/admin/tables/orders", status_code=303)
 
 
 @router.get("/invoices", response_class=HTMLResponse)
@@ -425,6 +526,39 @@ async def topups(request: Request, db: DbDep) -> HTMLResponse:
 # --- Users -------------------------------------------------------------------
 
 
+@router.get("/users/new", response_class=HTMLResponse)
+async def user_new(request: Request, db: DbDep) -> HTMLResponse:
+    """Show the dashboard user-creation form."""
+    ctx = await _ctx(request, db)
+    return _render(
+        request, "user_new.html", ctx=ctx, user_roles=(UserRole.CUSTOMER, UserRole.COURIER)
+    )
+
+
+@router.post("/users")
+async def user_create(
+    request: Request,
+    db: DbDep,
+    csrf_token: Annotated[str, Form()],
+    phone: Annotated[str, Form(min_length=1, max_length=20)],
+    role: Annotated[UserRole, Form()],
+    full_name: Annotated[str, Form(max_length=120)] = "",
+    email: Annotated[str, Form(max_length=255)] = "",
+) -> RedirectResponse:
+    """Create a customer or courier user from the dashboard."""
+    ctx = await _ctx(request, db)
+    verify_csrf(ctx, csrf_token, get_settings_from(request))
+    user = await ctx.service.create_user(
+        admin_id=ctx.admin.id,
+        phone=phone.strip(),
+        full_name=full_name.strip() or None,
+        email=email.strip().lower() or None,
+        role=role,
+        ip=client_ip(request),
+    )
+    return RedirectResponse(f"/admin/users/{user.id}", status_code=303)
+
+
 @router.get("/users/{user_id}", response_class=HTMLResponse)
 async def user_detail(request: Request, db: DbDep, user_id: uuid.UUID) -> HTMLResponse:
     """Show a user."""
@@ -472,6 +606,7 @@ async def user_edit(
     db: DbDep,
     user_id: uuid.UUID,
     csrf_token: Annotated[str, Form()],
+    phone: Annotated[str, Form(max_length=20)] = "",
     full_name: Annotated[str, Form(max_length=120)] = "",
     email: Annotated[str, Form(max_length=255)] = "",
 ) -> RedirectResponse:
@@ -483,9 +618,24 @@ async def user_edit(
         user_id=user_id,
         full_name=full_name.strip() or None,
         email=email.strip().lower() or None,
+        phone=phone.strip() or None,
         ip=client_ip(request),
     )
     return RedirectResponse(f"/admin/users/{user_id}", status_code=303)
+
+
+@router.post("/users/{user_id}/delete")
+async def user_delete(
+    request: Request,
+    db: DbDep,
+    user_id: uuid.UUID,
+    csrf_token: Annotated[str, Form()],
+) -> RedirectResponse:
+    """Soft-delete a user and revoke their current access."""
+    ctx = await _ctx(request, db)
+    verify_csrf(ctx, csrf_token, get_settings_from(request))
+    await ctx.service.delete_user(admin_id=ctx.admin.id, user_id=user_id, ip=client_ip(request))
+    return RedirectResponse("/admin/tables/users", status_code=303)
 
 
 # --- Audit logs --------------------------------------------------------------

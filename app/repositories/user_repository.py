@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
@@ -36,6 +37,15 @@ class UserRepository:
         result: User | None = await self._session.scalar(select(User).where(User.email == email))
         return result
 
+    async def create_admin_user(
+        self, *, phone: str, full_name: str | None, email: str | None, role: UserRole
+    ) -> User:
+        """Create a customer or courier account from the dashboard."""
+        user = User(phone=phone, full_name=full_name, email=email, role=role)
+        self._session.add(user)
+        await self._session.flush()
+        return user
+
     async def ensure_dashboard_admin(self, username: str) -> User | None:
         """Return the stable DB actor used by environment-authenticated dashboard sessions.
 
@@ -60,11 +70,19 @@ class UserRepository:
         return await self.get(admin_id)
 
     async def update_admin_profile(
-        self, user: User, *, full_name: str | None, email: str | None
+        self, user: User, *, phone: str | None, full_name: str | None, email: str | None
     ) -> None:
         """Update the safe, non-authentication fields exposed in the admin dashboard."""
+        if phone is not None:
+            user.phone = phone
         user.full_name = full_name
         user.email = email
+        await self._session.flush()
+
+    async def soft_delete(self, user: User) -> None:
+        """Disable a user while retaining rows required for financial/audit history."""
+        user.status = UserStatus.BANNED
+        user.deleted_at = datetime.now(UTC)
         await self._session.flush()
 
     async def set_status(self, user: User, status: UserStatus) -> None:

@@ -40,11 +40,16 @@ verifying a courier, and banning/unbanning a user.
 | `GET /admin` | overview: order counts, open disputes, pending withdrawals, system balances |
 | `GET /admin/tables` | catalog of every application-owned table and its access mode |
 | `GET /admin/tables/{table}?page=N` | bounded (50-row), redacted browser for any application table |
+| `GET`/`POST /admin/users/new`, `/admin/users` | create a customer or courier user |
 | `GET /admin/couriers`, `/admin/couriers/{id}` | list pending and detail; contact fields, city, and bio are visible to signed-in dashboard admins |
+| `GET`/`POST /admin/couriers/new`, `/admin/couriers` | create a profile for an existing courier user; encrypt a required national ID or passport |
+| `POST /admin/couriers/{id}/delete` | remove a courier profile; retains the user and historical records |
 | `POST /admin/couriers/{id}/verify` | approve/reject (step-up + CSRF + audit) |
 | `POST /admin/couriers/{id}/reveal-identity` | decrypt identity once (step-up + audit, `no-store`) |
+| `GET`/`POST /admin/orders/new`, `/admin/orders` | create a NEW order for an active customer |
 | `GET /admin/orders`, `/admin/orders/{id}` | delivery detail; only `NEW`/`ASSIGNED` orders may have city, date, description, or address note changed after step-up |
 | `POST /admin/orders/{id}/edit` | controlled non-financial delivery-detail update (step-up + CSRF + audit) |
+| `POST /admin/orders/{id}/delete` | permanently delete an unassigned `NEW` order only |
 | `GET /admin/invoices`, `/admin/invoices/{id}` | read-only (admins never author invoices) |
 | `GET /admin/promos`, `/admin/promos/{id}` | read-only list and detail |
 | `GET /admin/promos/{id}/redemptions` | who used it, when, how much |
@@ -53,16 +58,18 @@ verifying a courier, and banning/unbanning a user.
 | `GET /admin/wallets`, `/admin/wallets/{id}` | system + user balances |
 | `GET /admin/topups` | wallet top-up intents |
 | `GET /admin/users/{id}` | detail; contact fields are visible to signed-in dashboard admins |
-| `POST /admin/users/{id}/edit` | controlled full-name/email change (CSRF + audit) |
+| `POST /admin/users/{id}/edit` | edit phone, full name, or email (CSRF + audit) |
+| `POST /admin/users/{id}/delete` | soft-delete a user and revoke access; retains financial/audit history |
 | `POST /admin/users/{id}/ban` · `/unban` | moderate (step-up + CSRF + audit) |
 | `GET /admin/audit-logs` | read-only audit trail |
 
 The table catalog is metadata-backed and therefore includes all application tables without
 exposing Postgres/PostGIS system tables. It is view-only except for the record links to
 the controlled `users`, `courier_profiles`, and `orders` workflows above. Signed-in
-dashboard admins can see contact fields in the `users` table and linked user/courier
-details; tokens, encrypted fields, addresses, and identity fingerprints remain redacted
-in generic table views. Pagination is capped at 50 rows per page.
+dashboard admins can create, edit, and delete these records through their dedicated
+forms. Signed-in dashboard admins can see contact fields in the `users` table and linked
+user/courier details; tokens, encrypted fields, addresses, and identity fingerprints
+remain redacted in generic table views. Pagination is capped at 50 rows per page.
 
 ## Money boundary
 
@@ -70,8 +77,10 @@ No dashboard page moves money outside the ledger service. Dispute resolution and
 withdrawal processing move escrow funds and are therefore performed through the
 double-entry ledger service (Phase 4), not the dashboard; those pages are read-only
 here. The dashboard cannot edit payment, invoice, promo, wallet, transaction, or
-withdrawal records. Every permitted dashboard mutation writes an `audit_logs` row
-(actor, action, entity, ip).
+withdrawal records. User deletion is a soft delete, and physical order deletion is
+limited to unassigned `NEW` orders so it cannot erase billing, payment, or fulfillment
+history. Every permitted dashboard mutation writes an `audit_logs` row (actor, action,
+entity, ip).
 
 ## Withdrawal JSON actions
 

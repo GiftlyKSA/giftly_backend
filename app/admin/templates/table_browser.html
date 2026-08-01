@@ -13,6 +13,9 @@
     {% if data.table.editable %}Controlled edit{% else %}Read only{% endif %}
   </span>
 </div>
+{% if data.table.name == "users" %}<p><a class="btn" href="/admin/users/new">Add user</a></p>
+{% elif data.table.name == "courier_profiles" %}<p><a class="btn" href="/admin/couriers/new">Add courier profile</a></p>
+{% elif data.table.name == "orders" %}<p><a class="btn" href="/admin/orders/new">Add order</a></p>{% endif %}
 <p class="note">
   Showing up to 50 records per page. Encrypted, credential, and token fields stay masked.
   {% if data.table.name == "users" %}Signed-in dashboard admins can view user contact fields.{% else %}Personal-contact fields stay masked.{% endif %}

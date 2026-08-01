@@ -35,5 +35,10 @@
 {% else %}
 <p class="note">This order is read-only after payment or fulfillment begins.</p>
 {% endif %}
+{% if order.status == "NEW" %}
+<form method="post" action="/admin/orders/{{ order.id }}/delete" class="inline-form">
+  <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}"><button type="submit" class="danger">Delete order</button>
+</form>
+{% endif %}
 {% endif %}
 {% endblock %}

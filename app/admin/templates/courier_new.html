@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Add courier profile</h1>
+<p class="note">Create the courier user first, then use its ID below. The identity document is encrypted immediately and remains masked after creation.</p>
+<section class="card edit-card">
+  <form method="post" action="/admin/couriers">
+    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
+    <label>Courier user ID<input name="user_id" type="text" required></label>
+    <label>City<input name="city_of_residence" maxlength="100" required></label>
+    <label>Identity document type<select name="identity_type"><option value="national_id">National ID</option><option value="passport_id">Passport</option></select></label>
+    <label>Identity document<input name="identity_document" type="password" maxlength="100" required></label>
+    <label>Bio<textarea name="bio" maxlength="1000"></textarea></label>
+    <button type="submit">Create courier profile</button>
+  </form>
+</section>
+{% endblock %}

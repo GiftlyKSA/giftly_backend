@@ -138,6 +138,11 @@ class OrderRepository:
         order.delivery_address_note = delivery_address_note
         await self._session.flush()
 
+    async def delete(self, order: Order) -> None:
+        """Permanently remove a safe-to-delete draft order and dependent request media."""
+        await self._session.delete(order)
+        await self._session.flush()
+
     async def count_customer_active(self, customer_id: uuid.UUID) -> int:
         """Count a customer's non-terminal orders (concurrency limit)."""
         total = await self._session.scalar(

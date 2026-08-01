@@ -53,3 +53,41 @@ class CourierRepository:
         profile.city_of_residence = city_of_residence
         profile.bio = bio
         await self._session.flush()
+
+    async def create_admin_profile(
+        self,
+        *,
+        user_id: uuid.UUID,
+        city_of_residence: str,
+        bio: str | None,
+        national_id_encrypted: str | None,
+        passport_id_encrypted: str | None,
+        identity_fingerprint: str,
+    ) -> CourierProfile:
+        """Create a courier profile with encrypted identity data."""
+        profile = CourierProfile(
+            user_id=user_id,
+            city_of_residence=city_of_residence,
+            bio=bio,
+            national_id_encrypted=national_id_encrypted,
+            passport_id_encrypted=passport_id_encrypted,
+            identity_fingerprint=identity_fingerprint,
+        )
+        self._session.add(profile)
+        await self._session.flush()
+        return profile
+
+    async def fingerprint_exists(self, fingerprint: str) -> bool:
+        """Return whether an identity document is already assigned to a courier."""
+        return (
+            await self._session.scalar(
+                select(CourierProfile.user_id).where(
+                    CourierProfile.identity_fingerprint == fingerprint
+                )
+            )
+        ) is not None
+
+    async def delete(self, profile: CourierProfile) -> None:
+        """Remove a courier profile while retaining the underlying user history."""
+        await self._session.delete(profile)
+        await self._session.flush()

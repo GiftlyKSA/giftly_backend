@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Orders</h1>
+<p><a class="btn" href="/admin/orders/new">Add order</a></p>
 <table class="list">
   <thead><tr><th>Order</th><th>Status</th><th>City</th><th>Total</th><th>Created</th></tr></thead>
   <tbody>{% for o in orders %}

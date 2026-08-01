@@ -15,6 +15,7 @@
   <h2>Edit user profile</h2>
   <form method="post" action="/admin/users/{{ user.id }}/edit">
     <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
+    <label>Phone<input name="phone" value="{{ user.phone }}" maxlength="20"></label>
     <label>Full name<input name="full_name" value="{{ user.full_name or "" }}" maxlength="120"></label>
     <label>Email<input name="email" type="email" value="{{ user.email or "" }}" maxlength="255"></label>
     <button type="submit">Save user profile</button>
@@ -25,6 +26,8 @@
     <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}"><button type="submit" class="danger">Ban</button></form>
   <form method="post" action="/admin/users/{{ user.id }}/unban">
     <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}"><button type="submit">Unban</button></form>
+  <form method="post" action="/admin/users/{{ user.id }}/delete">
+    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}"><button type="submit" class="danger">Delete user</button></form>
   <form method="post" action="/admin/step-up/request">
     <input type="hidden" name="next" value="/admin/users/{{ user.id }}"><button type="submit">Step-up</button></form>
 </div>

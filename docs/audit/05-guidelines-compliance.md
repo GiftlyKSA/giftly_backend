@@ -22,7 +22,7 @@
 | Conventional commits | Pass | Reviewed recent history; final change uses a conventional commit. |
 | Google docstrings and formatting | Pass | Ruff and format checks clean. |
 | Docs follow contract changes | Pass | Endpoint docs and generated OpenAPI include withdrawals and headers. |
-| Admin table access boundary | Pass | Metadata-backed catalog is read-only by default; only audited users, courier profiles, and eligible order detail edits are exposed. |
+| Admin table access boundary | Pass | Metadata-backed catalog is read-only by default; audited CRUD exists only for users, courier profiles, and safe pre-payment orders. |
 | Tests for behavior changes | Pass | 233 tests, 87.90% coverage; race, storage, withdrawal, push, guard, and admin credential tests. |
 | No committed secrets or `.env` | Pass | Git ignore plus history/diff review; only explicit development/test values. |
 | Naming conventions | Pass | Plural tables, UUID PKs, money/encrypted suffixes, indexed migration. |

@@ -39,6 +39,10 @@
     <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
     <button type="submit">Reveal identity</button>
   </form>
+  <form method="post" action="/admin/couriers/{{ profile.user_id }}/delete">
+    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
+    <button type="submit" class="danger">Delete profile</button>
+  </form>
   <form method="post" action="/admin/step-up/request">
     <input type="hidden" name="next" value="/admin/couriers/{{ profile.user_id }}">
     <button type="submit">Step-up</button>

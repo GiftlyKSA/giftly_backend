@@ -29,6 +29,10 @@ verification (OPEN-1) and ownership-checked private-media delivery (OPEN-2).
   dashboard admins can view user contact fields; token, encrypted, identity, and
   address fields remain redacted. Its generic data views are read-only, and each
   allowed edit writes an audit row.
+- Dashboard user deletion is a soft delete that revokes active sessions. Courier-profile
+  creation encrypts a required national ID or passport and uses an HMAC fingerprint to
+  reject duplicate identities; physical order deletion is limited to unassigned `NEW`
+  rows, before financial or fulfillment history exists.
 - Paylink webhooks check trusted peer IP, then constant-time HMAC over raw bytes, then
   lock/status/amount/idempotency controls. Trusted forwarded headers are accepted only
   from configured proxy IPs/CIDRs.

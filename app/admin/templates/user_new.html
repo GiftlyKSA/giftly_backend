@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Add user</h1>
+<section class="card edit-card">
+  <form method="post" action="/admin/users">
+    <input type="hidden" name="csrf_token" value="{{ ctx.csrf_token }}">
+    <label>Phone<input name="phone" maxlength="20" required></label>
+    <label>Full name<input name="full_name" maxlength="120"></label>
+    <label>Email<input name="email" type="email" maxlength="255"></label>
+    <label>Role<select name="role">{% for role in user_roles %}<option value="{{ role }}">{{ role }}</option>{% endfor %}</select></label>
+    <button type="submit">Create user</button>
+  </form>
+</section>
+{% endblock %}
