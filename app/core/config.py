@@ -71,12 +71,12 @@ class Settings(BaseSettings):
     CLOUDFRONT_KEY_PAIR_ID: str | None = None
     CLOUDFRONT_PRIVATE_KEY: SecretStr | None = None
 
-    # Paylink (required only in production)
-    PAYLINK_API_ID: SecretStr | None = None
-    PAYLINK_SECRET_KEY: SecretStr | None = None
-    PAYLINK_WEBHOOK_SECRET: SecretStr | None = None
-    PAYLINK_ALLOWED_IPS: str | None = None
-    PAYLINK_CALLBACK_URL: str | None = None
+    # StreamPay (credentials and webhook secret required only in production)
+    STREAMPAY_API_KEY: SecretStr | None = None
+    STREAMPAY_API_SECRET: SecretStr | None = None
+    STREAMPAY_WEBHOOK_SECRET: SecretStr | None = None
+    STREAMPAY_SUCCESS_REDIRECT_URL: str | None = None
+    STREAMPAY_FAILURE_REDIRECT_URL: str | None = None
 
     # sndr.sh (required only in production)
     SNDR_API_KEY: SecretStr | None = None
@@ -244,11 +244,9 @@ class Settings(BaseSettings):
         if "*" in self.cors_origins:
             raise ValueError("CORS_ALLOWED_ORIGINS must not contain a wildcard in production.")
         self._require_production_fields(
-            "PAYLINK_API_ID",
-            "PAYLINK_SECRET_KEY",
-            "PAYLINK_WEBHOOK_SECRET",
-            "PAYLINK_ALLOWED_IPS",
-            "PAYLINK_CALLBACK_URL",
+            "STREAMPAY_API_KEY",
+            "STREAMPAY_API_SECRET",
+            "STREAMPAY_WEBHOOK_SECRET",
             "AWS_REGION",
             "AWS_ACCESS_KEY_ID",
             "AWS_SECRET_ACCESS_KEY",

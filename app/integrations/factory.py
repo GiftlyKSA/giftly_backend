@@ -16,9 +16,6 @@ from app.core.config import Environment, Settings
 from app.integrations.email.base import EmailClient
 from app.integrations.email.fake import FakeEmailClient
 from app.integrations.email.sndr_client import SndrEmailClient
-from app.integrations.paylink.base import PaymentGateway
-from app.integrations.paylink.fake import FakePaylinkClient
-from app.integrations.paylink.real import RealPaylinkClient
 from app.integrations.push.base import PushClient
 from app.integrations.push.fake import FakePushClient
 from app.integrations.push.real import RealPushClient
@@ -28,13 +25,16 @@ from app.integrations.sms.real import RealSmsClient
 from app.integrations.storage.base import StorageClient
 from app.integrations.storage.fake import FakeStorageClient
 from app.integrations.storage.real import S3StorageClient
+from app.integrations.streampay.base import StreamPayClient
+from app.integrations.streampay.fake import FakeStreamPayClient
+from app.integrations.streampay.real import RealStreamPayClient
 
 
 @dataclass(frozen=True)
 class Clients:
     """The bundle of integration clients wired for the active environment."""
 
-    gateway: PaymentGateway
+    gateway: StreamPayClient
     email: EmailClient
     sms: SmsClient
     push: PushClient
@@ -57,10 +57,12 @@ def build_clients(settings: Settings) -> Clients:
 
 
 def _build_production_clients(settings: Settings) -> Clients:
-    gateway = RealPaylinkClient(
-        api_id=_required_secret(settings.PAYLINK_API_ID, "PAYLINK_API_ID"),
-        secret_key=_required_secret(settings.PAYLINK_SECRET_KEY, "PAYLINK_SECRET_KEY"),
-        webhook_secret=_required_secret(settings.PAYLINK_WEBHOOK_SECRET, "PAYLINK_WEBHOOK_SECRET"),
+    gateway = RealStreamPayClient(
+        api_key=_required_secret(settings.STREAMPAY_API_KEY, "STREAMPAY_API_KEY"),
+        api_secret=_required_secret(settings.STREAMPAY_API_SECRET, "STREAMPAY_API_SECRET"),
+        webhook_secret=_required_secret(
+            settings.STREAMPAY_WEBHOOK_SECRET, "STREAMPAY_WEBHOOK_SECRET"
+        ),
     )
     email = SndrEmailClient(
         base_url=settings.SNDR_BASE_URL or "",
@@ -105,7 +107,7 @@ def _required_secret(value: SecretStr | None, name: str) -> str:
 
 def _build_fake_clients(environment: Environment) -> Clients:
     return Clients(
-        gateway=FakePaylinkClient(environment),
+        gateway=FakeStreamPayClient(environment),
         email=FakeEmailClient(environment),
         sms=FakeSmsClient(environment),
         push=FakePushClient(environment),

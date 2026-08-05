@@ -9,7 +9,6 @@ import pytest
 from app.core.config import Environment
 from app.integrations.email.sndr_client import SndrEmailClient
 from app.integrations.factory import build_clients
-from app.integrations.paylink.real import RealPaylinkClient
 from app.integrations.push.real import RealPushClient
 from app.integrations.sms.real import RealSmsClient
 from app.integrations.storage.real import S3StorageClient
@@ -56,27 +55,6 @@ def _mock_httpx(monkeypatch: pytest.MonkeyPatch, response: httpx.Response) -> No
         return original(*args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(httpx, "AsyncClient", factory)
-
-
-def test_real_paylink_signature_verification_is_constant_time() -> None:
-    client = RealPaylinkClient(api_id="id", secret_key="sk", webhook_secret="whsec")
-    import hashlib
-    import hmac
-
-    body = b'{"orderStatus":"Paid"}'
-    good = hmac.new(b"whsec", body, hashlib.sha256).hexdigest()
-    assert client.verify_webhook_signature(body, good)
-    assert not client.verify_webhook_signature(body, "deadbeef")
-
-
-async def test_real_paylink_create_charge(monkeypatch: pytest.MonkeyPatch) -> None:
-    _mock_httpx(monkeypatch, httpx.Response(200, json={"transactionNo": "T1", "url": "http://pay"}))
-    client = RealPaylinkClient(api_id="id", secret_key="sk", webhook_secret="whsec")
-    charge = await client.create_charge(
-        amount=__import__("decimal").Decimal("355.50"), order_number="o1", callback_url="http://cb"
-    )
-    assert charge.transaction_no == "T1"
-    assert charge.payment_url == "http://pay"
 
 
 async def test_sndr_email_send(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -150,7 +128,7 @@ async def test_real_storage_only_treats_missing_object_as_absent(code: str, miss
 
 def test_build_clients_returns_fakes_in_test() -> None:
     clients = build_clients(make_test_settings())
-    assert type(clients.gateway).__name__ == "FakePaylinkClient"
+    assert type(clients.gateway).__name__ == "FakeStreamPayClient"
     assert type(clients.email).__name__ == "FakeEmailClient"
 
 
@@ -159,11 +137,9 @@ def test_build_clients_returns_real_in_production() -> None:
         ENVIRONMENT=Environment.PRODUCTION.value,
         DEBUG=False,
         CORS_ALLOWED_ORIGINS="https://app.example.com",
-        PAYLINK_API_ID="id",
-        PAYLINK_SECRET_KEY="sk",
-        PAYLINK_WEBHOOK_SECRET="wh",
-        PAYLINK_ALLOWED_IPS="1.2.3.4",
-        PAYLINK_CALLBACK_URL="https://app.example.com/cb",
+        STREAMPAY_API_KEY="key",
+        STREAMPAY_API_SECRET="secret",
+        STREAMPAY_WEBHOOK_SECRET="wh",
         SNDR_API_KEY="k",
         SNDR_BASE_URL="https://sndr",
         SNDR_FROM_EMAIL="f@x",
@@ -181,5 +157,5 @@ def test_build_clients_returns_real_in_production() -> None:
         CLOUDFRONT_PRIVATE_KEY=_private_key_pem(),
     )
     clients = build_clients(settings)
-    assert type(clients.gateway).__name__ == "RealPaylinkClient"
+    assert type(clients.gateway).__name__ == "RealStreamPayClient"
     assert type(clients.email).__name__ == "SndrEmailClient"

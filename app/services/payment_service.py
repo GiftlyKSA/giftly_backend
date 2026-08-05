@@ -2,9 +2,9 @@
 
 There are exactly two reasons to call the gateway — a wallet top-up and an invoice
 remainder — both unified through ``payment_intents`` (ADR 0003). The webhook verifies
-the HMAC over the RAW body, does one lookup by transaction number, and dispatches on
+the HMAC over the RAW body, does one lookup by StreamPay payment-link ID, and dispatches on
 ``purpose``. Settlement is idempotent at three layers: a Redis lock on the transaction
-number, the intent's own status check, and the ledger's idempotency keys.
+payment-link ID, the intent's own status check, and the ledger's idempotency keys.
 """
 
 from __future__ import annotations
@@ -29,8 +29,13 @@ from app.core.exceptions import (
 )
 from app.core.locks import redis_lock
 from app.core.money import ZERO, parse_money, quantize_money
-from app.integrations.paylink.base import PaymentGateway
-from app.models import Invoice, Order, PaymentIntent
+from app.integrations.streampay.base import (
+    StreamPayCheckout,
+    StreamPayClient,
+    StreamPayCustomer,
+    StreamPayItem,
+)
+from app.models import Invoice, InvoiceItem, Order, PaymentIntent, User
 from app.models.enums import (
     InvoiceStatus,
     OrderStatus,
@@ -42,6 +47,7 @@ from app.repositories.invoice_repository import InvoiceRepository
 from app.repositories.order_repository import OrderRepository
 from app.repositories.payment_repository import PaymentRepository
 from app.repositories.promo_repository import PromoRepository
+from app.repositories.user_repository import UserRepository
 from app.repositories.wallet_repository import WalletRepository
 from app.services.money_service import MoneyService
 from app.services.order_state import assert_transition
@@ -74,9 +80,9 @@ class PayResult:
 class WebhookEvent:
     """A parsed gateway webhook payload."""
 
-    transaction_no: str
+    payment_link_id: str
     status: str
-    amount: Decimal
+    amount: Decimal | None
 
 
 @dataclass(frozen=True)
@@ -98,7 +104,8 @@ class PaymentService:
         wallets: WalletRepository,
         money: MoneyService,
         promos: PromoService,
-        gateway: PaymentGateway,
+        users: UserRepository,
+        gateway: StreamPayClient,
         redis: Redis,
         settings: Settings,
     ) -> None:
@@ -109,6 +116,7 @@ class PaymentService:
         self._wallets = wallets
         self._money = money
         self._promos = promos
+        self._users = users
         self._gateway = gateway
         self._redis = redis
         self._settings = settings
@@ -120,11 +128,8 @@ class PaymentService:
     def _expiry(self) -> datetime:
         return self._now() + timedelta(hours=self._settings.PAYMENT_EXPIRY_HOURS)
 
-    def _callback_url(self) -> str:
-        return self._settings.PAYLINK_CALLBACK_URL or "http://localhost:8000/api/webhooks/paylink"
-
     async def create_topup(self, *, user_id: uuid.UUID, amount: Decimal) -> TopupResult:
-        """Start a wallet top-up: create the intent and a gateway charge.
+        """Start a wallet top-up: create the intent and a StreamPay payment link.
 
         Raises:
             ValidationDomainError: The amount is outside the permitted top-up bounds.
@@ -150,20 +155,28 @@ class PaymentService:
         await self._payments.create_topup(
             user_id=user_id, wallet_id=wallet.id, payment_intent_id=intent.id, amount=amount
         )
-        charge = await self._gateway.create_charge(
-            amount=amount, order_number=str(intent.id), callback_url=self._callback_url()
+        checkout = await self._create_checkout(
+            intent=intent,
+            user_id=user_id,
+            items=(
+                StreamPayItem(
+                    name="SAFE-GIFT wallet top-up",
+                    description="Wallet credit",
+                    amount=amount,
+                ),
+            ),
         )
-        await self._payments.attach_gateway(
-            intent, transaction_no=charge.transaction_no, url=charge.payment_url
+        await self._payments.attach_streampay(
+            intent, payment_link_id=checkout.payment_link_id, url=checkout.payment_url
         )
-        return TopupResult(intent_id=intent.id, amount=amount, payment_url=charge.payment_url)
+        return TopupResult(intent_id=intent.id, amount=amount, payment_url=checkout.payment_url)
 
     async def pay_invoice(self, *, invoice_id: uuid.UUID, customer_id: uuid.UUID) -> PayResult:
         """Pay an issued invoice from wallet, gateway, or a split of both.
 
         If the wallet fully covers the total, the payment settles synchronously into
         escrow and the order moves to IN_PROGRESS. Otherwise the wallet portion is held
-        and a gateway charge is created for the remainder; the webhook settles it.
+        and a StreamPay payment link is created for the remainder; the webhook settles it.
 
         Raises:
             NotFoundError: No such invoice for this customer.
@@ -218,13 +231,13 @@ class PaymentService:
 
         # A remainder is due from the gateway. Reuse an open intent if one exists.
         existing = await self._payments.get_open_intent_for_invoice(invoice.id)
-        if existing is not None and existing.paylink_url is not None:
+        if existing is not None and existing.streampay_payment_url is not None:
             return PayResult(
                 invoice_id=invoice.id,
                 status="PENDING",
                 amount_from_wallet=invoice.amount_from_wallet,
                 amount_from_gateway=existing.amount,
-                payment_url=existing.paylink_url,
+                payment_url=existing.streampay_payment_url,
             )
 
         method = PaymentMethod.SPLIT if wallet_amount > ZERO else PaymentMethod.GATEWAY_ONLY
@@ -242,11 +255,17 @@ class PaymentService:
             reference_invoice_id=invoice.id,
             expires_at=self._expiry(),
         )
-        charge = await self._gateway.create_charge(
-            amount=gateway_amount, order_number=str(intent.id), callback_url=self._callback_url()
+        checkout = await self._create_checkout(
+            intent=intent,
+            user_id=customer_id,
+            items=self._invoice_checkout_items(
+                invoice_id=invoice.id,
+                payment_amount=gateway_amount,
+                invoice_items=await self._invoices.list_items(invoice.id),
+            ),
         )
-        await self._payments.attach_gateway(
-            intent, transaction_no=charge.transaction_no, url=charge.payment_url
+        await self._payments.attach_streampay(
+            intent, payment_link_id=checkout.payment_link_id, url=checkout.payment_url
         )
         await self._invoices.flush()
         return PayResult(
@@ -254,39 +273,39 @@ class PaymentService:
             status="PENDING",
             amount_from_wallet=wallet_amount,
             amount_from_gateway=gateway_amount,
-            payment_url=charge.payment_url,
+            payment_url=checkout.payment_url,
         )
 
     async def handle_webhook(self, *, raw_body: bytes, signature: str) -> WebhookResult:
         """Verify and process a gateway webhook.
 
         The signature is verified over the RAW body (never a re-serialized dict). A Redis
-        lock on the transaction number serializes concurrent duplicate deliveries.
+        lock on the StreamPay payment-link ID serializes concurrent duplicate deliveries.
 
         Raises:
             InvalidWebhookSignatureError: The HMAC does not match.
-            NotFoundError: No intent matches the transaction number.
+            NotFoundError: No intent matches the StreamPay payment-link ID.
             PaymentAmountMismatchError: The webhook amount != the intent amount.
         """
         if not self._gateway.verify_webhook_signature(raw_body, signature):
             raise InvalidWebhookSignatureError()
         event = self._parse(raw_body)
         async with redis_lock(
-            self._redis, f"lock:webhook:{event.transaction_no}", ttl_seconds=_WEBHOOK_LOCK_TTL
+            self._redis, f"lock:webhook:{event.payment_link_id}", ttl_seconds=_WEBHOOK_LOCK_TTL
         ):
             return await self._settle_locked(event)
 
     async def _settle_locked(self, event: WebhookEvent) -> WebhookResult:
-        intent = await self._payments.lock_intent_by_txn(event.transaction_no)
+        intent = await self._payments.lock_intent_by_payment_link(event.payment_link_id)
         if intent is None:
-            raise NotFoundError("Unknown transaction.")
+            raise NotFoundError("Unknown StreamPay payment link.")
         if intent.status is not PaymentIntentStatus.NEW:
             # Already PAID/FAILED — a replay. Idempotent no-op.
             return WebhookResult(outcome="already_processed")
         if event.status.upper() != "PAID":
             await self._payments.mark_failed(intent, reason=event.status)
             return WebhookResult(outcome="failed")
-        if quantize_money(event.amount) != quantize_money(intent.amount):
+        if event.amount is None or quantize_money(event.amount) != quantize_money(intent.amount):
             raise PaymentAmountMismatchError()
 
         if intent.purpose is PaymentPurpose.WALLET_TOPUP:
@@ -353,21 +372,111 @@ class PaymentService:
         await self._promos.consume(invoice_id=invoice.id)
         await self._invoices.flush()
 
+    async def _create_checkout(
+        self, *, intent: PaymentIntent, user_id: uuid.UUID, items: tuple[StreamPayItem, ...]
+    ) -> StreamPayCheckout:
+        """Create a single-use hosted checkout for a known local customer."""
+        user = await self._users.get(user_id)
+        if user is None:  # pragma: no cover - intent FK guarantees the user exists
+            raise NotFoundError("User not found.")
+        return await self._gateway.create_payment_link(
+            reference=str(intent.id),
+            customer=self._streampay_customer(user),
+            items=items,
+            success_redirect_url=self._settings.STREAMPAY_SUCCESS_REDIRECT_URL,
+            failure_redirect_url=self._settings.STREAMPAY_FAILURE_REDIRECT_URL,
+        )
+
+    @staticmethod
+    def _streampay_customer(user: User) -> StreamPayCustomer:
+        """Map the minimum local customer identity StreamPay needs for hosted checkout."""
+        return StreamPayCustomer(
+            external_id=str(user.id),
+            name=user.full_name or "SAFE-GIFT customer",
+            phone_number=user.phone,
+            email=user.email,
+        )
+
+    @staticmethod
+    def _invoice_checkout_items(
+        *, invoice_id: uuid.UUID, payment_amount: Decimal, invoice_items: list[InvoiceItem]
+    ) -> tuple[StreamPayItem, ...]:
+        """Represent a payable invoice as Stream products whose sum equals the remainder.
+
+        When the full invoice is paid externally, frozen invoice lines are sent one-for-one
+        plus a visible invoice adjustment for delivery, fees, tax, and discounts. A split
+        payment may be smaller than the item total, so it uses one authoritative balance
+        line to ensure StreamPay's invoice matches the amount held in our ledger exactly.
+        """
+        source_total = sum((quantize_money(item.line_total_amount) for item in invoice_items), ZERO)
+        if not invoice_items or source_total > payment_amount or any(
+            item.line_total_amount < Decimal("1.00") for item in invoice_items
+        ):
+            return (
+                StreamPayItem(
+                    name=f"SAFE-GIFT invoice {invoice_id}",
+                    description="Outstanding invoice balance",
+                    amount=payment_amount,
+                ),
+            )
+
+        items = [
+            StreamPayItem(
+                name=item.title,
+                description=(
+                    f"Quantity: {item.quantity}. {item.description or ''}".strip()
+                ),
+                amount=quantize_money(item.line_total_amount),
+            )
+            for item in invoice_items
+        ]
+        adjustment = quantize_money(payment_amount - source_total)
+        if adjustment >= Decimal("1.00"):
+            items.append(
+                StreamPayItem(
+                    name="Invoice adjustment",
+                    description="Delivery, service fees, tax, and discounts",
+                    amount=adjustment,
+                )
+            )
+        elif adjustment > ZERO:
+            last = items[-1]
+            items[-1] = StreamPayItem(
+                name=last.name,
+                description=last.description,
+                amount=quantize_money(last.amount + adjustment),
+            )
+        return tuple(items)
+
     @staticmethod
     def _parse(raw_body: bytes) -> WebhookEvent:
         try:
             data = json.loads(raw_body)
+            details = data.get("data", {})
+            if not isinstance(details, dict):
+                raise TypeError("data must be an object")
+            payment_link = details.get("payment_link", {})
+            payment = details.get("payment", {})
+            invoice = details.get("invoice", {})
+            if not isinstance(payment_link, dict) or not isinstance(payment, dict):
+                raise TypeError("payment data must be an object")
+            amount = payment.get(
+                "amount", invoice.get("amount") if isinstance(invoice, dict) else None
+            )
+            event_type = str(data.get("event_type", ""))
             return WebhookEvent(
-                transaction_no=str(data["transaction_no"]),
-                status=str(data["status"]),
-                amount=parse_money(str(data["amount"])),
+                payment_link_id=str(payment_link["id"]),
+                status=(
+                    "PAID" if event_type.upper() == "PAYMENT_SUCCEEDED" else str(payment["status"])
+                ),
+                amount=parse_money(str(amount)) if amount is not None else None,
             )
         except (ValueError, KeyError, TypeError) as exc:
             raise ValidationDomainError("Malformed webhook payload.") from exc
 
 
 def build_payment_service(
-    *, session: AsyncSession, gateway: PaymentGateway, redis: Redis, settings: Settings
+    *, session: AsyncSession, gateway: StreamPayClient, redis: Redis, settings: Settings
 ) -> PaymentService:
     """Assemble a PaymentService with fresh repositories bound to one session."""
     return PaymentService(
@@ -375,6 +484,7 @@ def build_payment_service(
         invoices=InvoiceRepository(session),
         orders=OrderRepository(session),
         wallets=WalletRepository(session),
+        users=UserRepository(session),
         money=MoneyService(WalletRepository(session)),
         promos=PromoService(PromoRepository(session)),
         gateway=gateway,

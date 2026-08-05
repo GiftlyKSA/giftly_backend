@@ -33,13 +33,13 @@ verification (OPEN-1) and ownership-checked private-media delivery (OPEN-2).
   creation encrypts a required national ID or passport and uses an HMAC fingerprint to
   reject duplicate identities; physical order deletion is limited to unassigned `NEW`
   rows, before financial or fulfillment history exists.
-- Paylink webhooks check trusted peer IP, then constant-time HMAC over raw bytes, then
-  lock/status/amount/idempotency controls. Trusted forwarded headers are accepted only
-  from configured proxy IPs/CIDRs.
+- StreamPay webhooks verify the timestamped, constant-time HMAC over raw bytes, then
+  apply lock/status/amount/idempotency controls. Trusted forwarded headers are accepted
+  only from configured proxy IPs/CIDRs.
 - Upload keys are server-generated and allow-listed. S3 upload signatures bind MIME and
   exact length; confirmation checks HEAD metadata and magic bytes. CloudFront URLs are
   short-lived and RSA/SHA-256 signed.
-- Production boot now requires Paylink, email, SMS, push, S3, and CloudFront settings;
+- Production boot now requires StreamPay, email, SMS, push, S3, and CloudFront settings;
   fake clients independently refuse production construction.
 - No f-string SQL, user-supplied fetch URL, committed secret, or production fake path
   was found. `pip-audit --strict` reports no known dependency vulnerability.
@@ -48,8 +48,8 @@ verification (OPEN-1) and ownership-checked private-media delivery (OPEN-2).
 
 ### OPEN-1 (High) — external security contracts are not proven
 
-The Paylink request/response mapping, sndr payload, SMS endpoint, and Supabase push edge
-function are marked `VENDOR CONTRACT`. Local tests validate isolation, HMAC behavior,
+The StreamPay request/response mapping follows its published OpenAPI schema. Local tests
+validate isolation, HMAC behavior,
 timeouts, and HTTP error propagation, but not the providers' actual schemas, replay
 headers, authentication requirements, or error bodies. Run provider sandbox contract
 tests and pin those schemas before enabling production credentials.

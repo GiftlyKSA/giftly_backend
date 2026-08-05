@@ -1,0 +1,1 @@
+"""StreamPay payment integration."""

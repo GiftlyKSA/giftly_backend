@@ -57,15 +57,6 @@ class PayInvoiceResponse(BaseModel):
     payment_url: str | None = None
 
 
-class PaylinkWebhookPayload(BaseModel):
-    """The gateway webhook body (also validated from the RAW bytes in the service)."""
-
-    model_config = ConfigDict(extra="ignore")
-    transaction_no: _Txn
-    status: Annotated[str, StringConstraints(min_length=1, max_length=32)]
-    amount: _MoneyStr
-
-
 class WebhookAck(BaseModel):
     """The webhook acknowledgement returned to the gateway."""
 
@@ -73,8 +64,8 @@ class WebhookAck(BaseModel):
 
 
 class SimulatePaymentRequest(BaseModel):
-    """Development-only: simulate a gateway callback for a transaction number."""
+    """Development-only: simulate a StreamPay callback for a payment-link ID."""
 
     model_config = ConfigDict(extra="forbid")
-    transaction_no: _Txn
+    payment_link_id: _Txn
     status: Annotated[str, StringConstraints(min_length=1, max_length=32)] = "PAID"

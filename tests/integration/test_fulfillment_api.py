@@ -44,16 +44,24 @@ def _future() -> str:
     return (date.today() + timedelta(days=30)).isoformat()
 
 
-def _txn(url: str) -> str:
-    return parse_qs(urlparse(url).query)["transaction_no"][0]
+def _payment_link_id(url: str) -> str:
+    return parse_qs(urlparse(url).query)["payment_link_id"][0]
 
 
-async def _settle(client: AsyncClient, app: object, txn: str, amount: str) -> None:
-    body = _json.dumps({"transaction_no": txn, "status": "PAID", "amount": amount}).encode()
+async def _settle(client: AsyncClient, app: object, payment_link_id: str, amount: str) -> None:
+    body = _json.dumps(
+        {
+            "event_type": "PAYMENT_SUCCEEDED",
+            "data": {
+                "payment_link": {"id": payment_link_id},
+                "payment": {"status": "PAID", "amount": amount},
+            },
+        }
+    ).encode()
     sig = app.state.clients.gateway.sign(body)  # type: ignore[attr-defined]
     await client.post(
-        "/api/webhooks/paylink",
-        headers={"X-Paylink-Signature": sig, "Content-Type": "application/json"},
+        "/api/webhooks/streampay",
+        headers={"X-Webhook-Signature": sig, "Content-Type": "application/json"},
         content=body,
     )
 
@@ -140,7 +148,7 @@ async def _paid_in_progress(
     assert inv.status_code == 201, inv.text
 
     top = await client.post("/api/wallets/topup", headers=cust_h, json={"amount": "1000.00"})
-    await _settle(client, app, _txn(top.json()["payment_url"]), "1000.00")
+    await _settle(client, app, _payment_link_id(top.json()["payment_url"]), "1000.00")
     pay = await client.post(f"/api/invoices/{inv.json()['id']}/pay", headers=cust_h)
     assert pay.json()["status"] == "PAID", pay.text
     return cust_h, cour_h, order_id

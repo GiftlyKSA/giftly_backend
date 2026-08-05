@@ -81,5 +81,5 @@ uv run alembic upgrade head
   compare-and-delete on your random token.
 - A sync SDK call inside an async handler stalls the whole event loop — wrap it in
   `run_in_threadpool`.
-- Verify the Paylink webhook signature over the **raw** body, never the re-serialized
+- Verify the StreamPay webhook signature over the **raw** body, never the re-serialized
   dict.

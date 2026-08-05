@@ -20,7 +20,7 @@ from app.core.exceptions import (
     ValidationDomainError,
 )
 from app.core.redis import build_redis
-from app.integrations.paylink.fake import FakePaylinkClient
+from app.integrations.streampay.fake import FakeStreamPayClient
 from app.models import Invoice, Order, User, Wallet
 from app.models.enums import (
     InvoiceStatus,
@@ -63,7 +63,7 @@ async def redis_client() -> AsyncIterator[Redis]:
 def _service(db: AsyncSession, redis: Redis) -> object:
     return build_payment_service(
         session=db,
-        gateway=FakePaylinkClient(_settings().ENVIRONMENT),
+        gateway=FakeStreamPayClient(_settings().ENVIRONMENT),
         redis=redis,
         settings=_settings(),
     )
@@ -172,7 +172,7 @@ async def test_hold_funds_rejects_insufficient(db_session: AsyncSession) -> None
 async def test_webhook_rejects_bad_signature(db_session: AsyncSession, redis_client: Redis) -> None:
     with pytest.raises(InvalidWebhookSignatureError):
         await _service(db_session, redis_client).handle_webhook(
-            raw_body=b'{"transaction_no":"x","status":"PAID","amount":"1.00"}',
+            raw_body=_body("x", "1.00"),
             signature="bad",
         )
 
@@ -181,8 +181,8 @@ async def test_webhook_unknown_transaction_is_404(
     db_session: AsyncSession, redis_client: Redis
 ) -> None:
     svc = _service(db_session, redis_client)
-    gateway = FakePaylinkClient(_settings().ENVIRONMENT)
-    body = b'{"transaction_no":"UNKNOWN-TXN","status":"PAID","amount":"1.00"}'
+    gateway = FakeStreamPayClient(_settings().ENVIRONMENT)
+    body = _body("UNKNOWN-LINK", "1.00")
     with pytest.raises(NotFoundError):
         # Sign with the same test secret the service's gateway verifies against.
         await svc.handle_webhook(raw_body=body, signature=gateway.sign(body))
@@ -202,10 +202,10 @@ async def test_webhook_amount_mismatch_rejected(
         reference_invoice_id=None,
         expires_at=datetime.now(UTC) + timedelta(hours=48),
     )
-    await payments.attach_gateway(intent, transaction_no="TXN-MISMATCH", url="http://x")
+    await payments.attach_streampay(intent, payment_link_id="LINK-MISMATCH", url="http://x")
 
-    gateway = FakePaylinkClient(_settings().ENVIRONMENT)
-    body = b'{"transaction_no":"TXN-MISMATCH","status":"PAID","amount":"999.00"}'
+    gateway = FakeStreamPayClient(_settings().ENVIRONMENT)
+    body = _body("LINK-MISMATCH", "999.00")
     with pytest.raises(PaymentAmountMismatchError):
         await _service(db_session, redis_client).handle_webhook(
             raw_body=body, signature=gateway.sign(body)
@@ -213,13 +213,21 @@ async def test_webhook_amount_mismatch_rejected(
 
 
 def _signed(body: bytes) -> str:
-    return FakePaylinkClient(_settings().ENVIRONMENT).sign(body)
+    return FakeStreamPayClient(_settings().ENVIRONMENT).sign(body)
 
 
-def _body(txn: str, amount: str, status: str = "PAID") -> bytes:
+def _body(payment_link_id: str, amount: str, status: str = "PAID") -> bytes:
     import json as _json
 
-    return _json.dumps({"transaction_no": txn, "status": status, "amount": amount}).encode("utf-8")
+    return _json.dumps(
+        {
+            "event_type": "PAYMENT_SUCCEEDED" if status == "PAID" else "PAYMENT_FAILED",
+            "data": {
+                "payment_link": {"id": payment_link_id},
+                "payment": {"status": status, "amount": amount},
+            },
+        }
+    ).encode("utf-8")
 
 
 async def test_create_topup_and_settle_via_webhook(
@@ -231,7 +239,9 @@ async def test_create_topup_and_settle_via_webhook(
     assert result.payment_url and result.amount == Decimal("500.00")
 
     intent = await svc._payments.get_intent(result.intent_id)  # type: ignore[attr-defined]
-    body = _body(intent.paylink_transaction_no, "500.00")
+    assert intent.streampay_payment_link_id is not None
+    assert intent.checkout_provider == "STREAMPAY"
+    body = _body(intent.streampay_payment_link_id, "500.00")
     out = await svc.handle_webhook(raw_body=body, signature=_signed(body))
     assert out.outcome == "processed"
     await db_session.refresh(wallet)
@@ -270,7 +280,8 @@ async def test_pay_invoice_via_gateway_then_webhook_settles(
 
     intent = await PaymentRepository(db_session).get_open_intent_for_invoice(invoice.id)
     assert intent is not None
-    body = _body(intent.paylink_transaction_no, "724.50")
+    assert intent.streampay_payment_link_id is not None
+    body = _body(intent.streampay_payment_link_id, "724.50")
     out = await svc.handle_webhook(raw_body=body, signature=_signed(body))
     assert out.outcome == "processed"
     assert invoice.status is InvoiceStatus.PAID
@@ -291,8 +302,8 @@ async def test_webhook_marks_intent_failed_on_non_paid(
         reference_invoice_id=None,
         expires_at=datetime.now(UTC) + timedelta(hours=48),
     )
-    await payments.attach_gateway(intent, transaction_no="TXN-FAIL", url="http://x")
-    body = b'{"transaction_no":"TXN-FAIL","status":"FAILED","amount":"500.00"}'
+    await payments.attach_streampay(intent, payment_link_id="LINK-FAIL", url="http://x")
+    body = _body("LINK-FAIL", "500.00", status="FAILED")
     out = await _service(db_session, redis_client).handle_webhook(
         raw_body=body, signature=_signed(body)
     )

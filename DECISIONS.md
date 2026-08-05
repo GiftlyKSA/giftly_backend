@@ -144,16 +144,16 @@ explicit / consistent option was chosen) and environment-forced deviations, date
   is released and the balance is debited; a replay never re-releases it. A wallet that fully
   covers the total settles synchronously with no gateway round-trip.
 - **2026-07-18** — Webhook idempotency is enforced at three layers: a Redis lock on the
-  transaction number (serializes concurrent duplicate deliveries), the intent's own status
+  payment-link ID (serializes concurrent duplicate deliveries), the intent's own status
   check (PAID => no-op), and the ledger idempotency key `invoice:<id>:escrow` /
   `intent:<id>:topup` (the race backstop via `uq_transactions_idempotency`). The signature
   is verified over the RAW body before the payload is parsed — never re-serialized.
 - **2026-07-18** — The webhook runs in its own committing session (not the request-scoped
   `get_db`) so a settlement is explicit and a gateway retry sees the committed result. The
-  fake gateway now issues transaction numbers with a random per-instance prefix so they stay
-  globally unique against the `uq_payment_intents_paylink_txn` index across app instances.
-- **2026-07-18** — `POST /api/dev/paylink/simulate` (development only) builds the exact
-  webhook body for a transaction number, signs it with the fake gateway's test secret, and
+  fake gateway now issues payment-link IDs with a random per-instance prefix so they stay
+  globally unique against the payment-intent link index across app instances.
+- **2026-07-18** — `POST /api/dev/streampay/simulate` (development only) builds the exact
+  webhook body for a payment-link ID, signs it with the fake gateway's test secret, and
   calls the REAL webhook handler — it never bypasses webhook processing (SPEC SECTION 5.1).
 - **2026-07-18** — Receipt (Phase 9): the invoice-paid receipt is delivered by a sweeper
   over the `idx_invoices_receipt_pending` index (PAID + `receipt_email_sent_at IS NULL`),
@@ -246,8 +246,8 @@ explicit / consistent option was chosen) and environment-forced deviations, date
 - **2026-07-20** — Audit-fix batch (every actionable finding from docs/audit/): a ban now
   revokes ALL live refresh tokens and sets a Redis `auth:banned:<user_id>` flag checked
   by `require_auth` on every request (one MGET with the denylist), and both refresh and
-  OTP re-login reject BANNED accounts — SEC-1 closed end to end. `PAYLINK_ALLOWED_IPS`
-  is now enforced at the webhook (403 before the HMAC gate). The OTP HMAC key chain is
+  OTP re-login reject BANNED accounts — SEC-1 closed end to end. StreamPay webhooks are
+  authenticated by a timestamped HMAC before parsing. The OTP HMAC key chain is
   `OTP_HMAC_KEY -> JWT_SECRET -> IDENTITY_FINGERPRINT_PEPPER` — never a constant. WS
   chat frames are guarded (JSON-only, `WS_MAX_FRAME_BYTES` cap, per-user Redis throttle,
   mid-connection ban closes the socket) and WS sends now fire the same recipient push as

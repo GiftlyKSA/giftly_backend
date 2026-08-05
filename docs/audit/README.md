@@ -40,7 +40,7 @@ unless they still apply.
 
 | ID | Severity | Summary |
 | --- | --- | --- |
-| OPEN-1 | High | Paylink, sndr, SMS, and push adapters still contain vendor-contract placeholders and need sandbox/live contract tests before production. |
+| OPEN-1 | High | StreamPay, sndr, SMS, and push adapters need sandbox/live contract tests before production credentials are enabled. |
 | OPEN-2 | Medium | Private media read signing exists, but no ownership-checked endpoint/response currently delivers signed read URLs to clients. |
 | OPEN-3 | Medium | `held_balance` mutations are locked, but reconciliation does not reconstruct holds from pending invoices and withdrawals. |
 | OPEN-4 | Low | Key rotation and wallet reconciliation materialize full tables; acceptable now, but should page/stream before large scale. |

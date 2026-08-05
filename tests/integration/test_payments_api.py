@@ -1,7 +1,7 @@
 """End-to-end payment tests: top-up, wallet/gateway invoice payment, webhook idempotency.
 
 The dev simulate route fires a correctly-signed webhook at the REAL handler, so these
-exercise the whole gateway path with no Paylink credentials. Runs on one event loop via
+exercise the whole gateway path with no StreamPay credentials. Runs on one event loop via
 httpx's ASGI transport; skips if DB/Redis are unavailable.
 """
 
@@ -41,21 +41,29 @@ def _future() -> str:
     return (date.today() + timedelta(days=30)).isoformat()
 
 
-def _txn_from_url(url: str) -> str:
-    return parse_qs(urlparse(url).query)["transaction_no"][0]
+def _payment_link_id_from_url(url: str) -> str:
+    return parse_qs(urlparse(url).query)["payment_link_id"][0]
 
 
 async def _settle(
-    client: AsyncClient, app: object, txn: str, amount: str, status: str = "PAID"
+    client: AsyncClient, app: object, payment_link_id: str, amount: str, status: str = "PAID"
 ) -> dict:
     """Post a correctly-signed webhook at the real handler and return its JSON."""
     import json as _json
 
-    body = _json.dumps({"transaction_no": txn, "status": status, "amount": amount}).encode("utf-8")
+    body = _json.dumps(
+        {
+            "event_type": "PAYMENT_SUCCEEDED" if status == "PAID" else "PAYMENT_FAILED",
+            "data": {
+                "payment_link": {"id": payment_link_id},
+                "payment": {"status": status, "amount": amount},
+            },
+        }
+    ).encode("utf-8")
     signature = app.state.clients.gateway.sign(body)  # type: ignore[attr-defined]
     resp = await client.post(
-        "/api/webhooks/paylink",
-        headers={"X-Paylink-Signature": signature, "Content-Type": "application/json"},
+        "/api/webhooks/streampay",
+        headers={"X-Webhook-Signature": signature, "Content-Type": "application/json"},
         content=body,
     )
     return {"status_code": resp.status_code, "json": resp.json() if resp.content else {}}
@@ -155,12 +163,12 @@ async def test_topup_credits_wallet_on_webhook() -> None:
 
             top = await client.post("/api/wallets/topup", headers=h, json={"amount": "500.00"})
             assert top.status_code == 201, top.text
-            txn = _txn_from_url(top.json()["payment_url"])
+            payment_link_id = _payment_link_id_from_url(top.json()["payment_url"])
 
             # Before settlement the wallet is empty.
             assert (await client.get("/api/wallets/me", headers=h)).json()["balance"] == "0.00"
 
-            sim = await _settle(client, app, txn, "500.00")
+            sim = await _settle(client, app, payment_link_id, "500.00")
             assert sim["status_code"] == 200 and sim["json"]["outcome"] == "processed"
 
             wallet = await client.get("/api/wallets/me", headers=h)
@@ -168,7 +176,7 @@ async def test_topup_credits_wallet_on_webhook() -> None:
             assert wallet.json()["available"] == "500.00"
 
             # A duplicate webhook is idempotent — no double credit.
-            again = await _settle(client, app, txn, "500.00")
+            again = await _settle(client, app, payment_link_id, "500.00")
             assert again["json"]["outcome"] == "already_processed"
             assert (await client.get("/api/wallets/me", headers=h)).json()["balance"] == "500.00"
     finally:
@@ -188,7 +196,9 @@ async def test_pay_invoice_from_wallet_settles_immediately() -> None:
             top = await client.post(
                 "/api/wallets/topup", headers=cust_h, json={"amount": "1000.00"}
             )
-            await _settle(client, app, _txn_from_url(top.json()["payment_url"]), "1000.00")
+            await _settle(
+                client, app, _payment_link_id_from_url(top.json()["payment_url"]), "1000.00"
+            )
 
             pay = await client.post(f"/api/invoices/{invoice_id}/pay", headers=cust_h)
             assert pay.status_code == 200, pay.text
@@ -231,7 +241,9 @@ async def test_pay_invoice_via_gateway_settles_on_webhook() -> None:
             order = await client.get(f"/api/orders/{order_id}", headers=cust_h)
             assert order.json()["status"] == "WAITING_PAYMENT"
 
-            sim = await _settle(client, app, _txn_from_url(pay.json()["payment_url"]), "724.50")
+            sim = await _settle(
+                client, app, _payment_link_id_from_url(pay.json()["payment_url"]), "724.50"
+            )
             assert sim["json"]["outcome"] == "processed"
 
             inv = await client.get(f"/api/invoices/{invoice_id}", headers=cust_h)
@@ -250,9 +262,12 @@ async def test_webhook_rejects_bad_signature() -> None:
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
             resp = await client.post(
-                "/api/webhooks/paylink",
-                headers={"X-Paylink-Signature": "deadbeef"},
-                json={"transaction_no": "FAKE-TXN-00000001", "status": "PAID", "amount": "500.00"},
+                "/api/webhooks/streampay",
+                headers={"X-Webhook-Signature": "deadbeef"},
+                json={
+                    "event_type": "PAYMENT_SUCCEEDED",
+                    "data": {"payment_link": {"id": "unknown"}, "payment": {"amount": "500.00"}},
+                },
             )
             assert resp.status_code == 401
     finally:
@@ -275,15 +290,17 @@ async def test_dev_simulate_route_settles_topup() -> None:
             cust = await _register(client, app, _phone(), "CUSTOMER")
             h = {"Authorization": f"Bearer {cust['access_token']}"}
             top = await client.post("/api/wallets/topup", headers=h, json={"amount": "300.00"})
-            txn = _txn_from_url(top.json()["payment_url"])
+            payment_link_id = _payment_link_id_from_url(top.json()["payment_url"])
 
-            sim = await client.post("/api/dev/paylink/simulate", json={"transaction_no": txn})
+            sim = await client.post(
+                "/api/dev/streampay/simulate", json={"payment_link_id": payment_link_id}
+            )
             assert sim.status_code == 200 and sim.json()["outcome"] == "processed"
             assert (await client.get("/api/wallets/me", headers=h)).json()["balance"] == "300.00"
 
-            # An unknown transaction is a 404.
+            # An unknown payment link is a 404.
             missing = await client.post(
-                "/api/dev/paylink/simulate", json={"transaction_no": "NOPE-404"}
+                "/api/dev/streampay/simulate", json={"payment_link_id": "NOPE-404"}
             )
             assert missing.status_code == 404
     finally:

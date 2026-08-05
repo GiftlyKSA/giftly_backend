@@ -562,8 +562,11 @@ class PaymentIntent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=False,
         server_default=enums.PaymentIntentStatus.NEW.value,
     )
-    paylink_transaction_no: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    paylink_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    checkout_provider: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default=text("'STREAMPAY'")
+    )
+    streampay_payment_link_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    streampay_payment_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
     reference_invoice_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("invoices.id"), nullable=True
     )
@@ -579,10 +582,10 @@ class PaymentIntent(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name="chk_intent_purpose_reference",
         ),
         Index(
-            "uq_payment_intents_paylink_txn",
-            "paylink_transaction_no",
+            "uq_payment_intents_streampay_link",
+            "streampay_payment_link_id",
             unique=True,
-            postgresql_where=text("paylink_transaction_no IS NOT NULL"),
+            postgresql_where=text("streampay_payment_link_id IS NOT NULL"),
         ),
         Index("idx_payment_intents_user_created", "user_id", text("created_at DESC")),
         Index(

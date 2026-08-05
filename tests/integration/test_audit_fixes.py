@@ -119,41 +119,6 @@ async def test_ban_revokes_live_access_and_refresh() -> None:
         await app.state.engine.dispose()
 
 
-async def test_webhook_rejects_disallowed_source_ip() -> None:
-    """SEC-2: PAYLINK_ALLOWED_IPS is enforced, not just required."""
-    settings = _settings(PAYLINK_ALLOWED_IPS="10.9.9.9")
-    await _skip_unless_db(settings)
-    app = create_app_for_test(settings)
-    try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
-            # ASGITransport presents 127.0.0.1, which is not on the allowlist.
-            resp = await client.post(
-                "/api/webhooks/paylink", content=b"{}", headers={"X-Paylink-Signature": "x"}
-            )
-            assert resp.status_code == 403
-            assert resp.json()["error"]["code"] == "FORBIDDEN"
-    finally:
-        await app.state.redis.aclose()
-        await app.state.engine.dispose()
-
-
-async def test_webhook_allows_listed_source_ip() -> None:
-    """SEC-2: a listed source proceeds to (and fails) signature verification instead."""
-    settings = _settings(PAYLINK_ALLOWED_IPS="127.0.0.1, 10.0.0.1")
-    await _skip_unless_db(settings)
-    app = create_app_for_test(settings)
-    try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as client:
-            resp = await client.post(
-                "/api/webhooks/paylink", content=b"{}", headers={"X-Paylink-Signature": "bad"}
-            )
-            # Past the IP gate; the HMAC gate rejects with 401 (not 403).
-            assert resp.status_code == 401
-    finally:
-        await app.state.redis.aclose()
-        await app.state.engine.dispose()
-
-
 async def test_otp_hmac_key_prefers_dedicated_env_var() -> None:
     """SEC-3: OTP_HMAC_KEY wins; the fallback chain never lands on a constant."""
     from app.integrations.sms.fake import FakeSmsClient

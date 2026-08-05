@@ -69,8 +69,8 @@ def test_production_with_debug_refuses_boot() -> None:
         )
 
 
-def test_production_missing_paylink_refuses_boot() -> None:
-    with pytest.raises(ValueError, match="PAYLINK"):
+def test_production_missing_streampay_refuses_boot() -> None:
+    with pytest.raises(ValueError, match="STREAMPAY"):
         Settings(  # type: ignore[call-arg]
             _env_file=None,
             **_base_env(ENVIRONMENT="production", DEBUG="false"),

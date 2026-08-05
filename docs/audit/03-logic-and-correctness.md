@@ -29,10 +29,9 @@ feature-completeness gaps remain at external/media boundaries.
 
 ### OPEN-1 (High) — vendor adapters are placeholders until contract-tested
 
-The application-side abstractions and failure behavior are correct, but comments in the
-real Paylink, sndr, SMS, and push clients explicitly defer final wire mappings. This is
-not safe to discover with real customer payments or OTP traffic. Treat sandbox contract
-tests as a release requirement.
+The StreamPay adapter follows the vendor's published OpenAPI contract, but it has not yet
+been exercised against a merchant sandbox. This is not safe to discover with real customer
+payments or OTP traffic. Treat sandbox contract tests as a release requirement.
 
 ### OPEN-2 (Medium) — private media has no authorized read delivery
 

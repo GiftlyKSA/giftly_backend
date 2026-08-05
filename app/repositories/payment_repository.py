@@ -1,7 +1,7 @@
 """Payment-intent and wallet-top-up persistence (SPEC SECTION 5.1, ADR 0003).
 
 A single ``payment_intents`` row is the only gateway-facing record, discriminated by
-``purpose``. The webhook does ONE lookup by ``paylink_transaction_no`` and dispatches on
+``purpose``. The webhook does ONE lookup by ``streampay_payment_link_id`` and dispatches on
 purpose — the ambiguity that produces double-credits is designed out.
 """
 
@@ -47,10 +47,13 @@ class PaymentRepository:
         await self._session.flush()
         return intent
 
-    async def attach_gateway(self, intent: PaymentIntent, *, transaction_no: str, url: str) -> None:
-        """Record the gateway's transaction number and payment URL on the intent."""
-        intent.paylink_transaction_no = transaction_no
-        intent.paylink_url = url
+    async def attach_streampay(
+        self, intent: PaymentIntent, *, payment_link_id: str, url: str
+    ) -> None:
+        """Record StreamPay's payment-link ID and hosted checkout URL on the intent."""
+        intent.checkout_provider = "STREAMPAY"
+        intent.streampay_payment_link_id = payment_link_id
+        intent.streampay_payment_url = url
         await self._session.flush()
 
     async def create_topup(
@@ -76,11 +79,11 @@ class PaymentRepository:
         """Return a payment intent by id, or None."""
         return await self._session.get(PaymentIntent, intent_id)
 
-    async def lock_intent_by_txn(self, transaction_no: str) -> PaymentIntent | None:
-        """Load a payment intent by gateway transaction number FOR UPDATE."""
+    async def lock_intent_by_payment_link(self, payment_link_id: str) -> PaymentIntent | None:
+        """Load a payment intent by StreamPay payment-link ID FOR UPDATE."""
         result: PaymentIntent | None = await self._session.scalar(
             select(PaymentIntent)
-            .where(PaymentIntent.paylink_transaction_no == transaction_no)
+            .where(PaymentIntent.streampay_payment_link_id == payment_link_id)
             .with_for_update()
         )
         return result

@@ -1303,24 +1303,24 @@
       },
       "SimulatePaymentRequest": {
         "additionalProperties": false,
-        "description": "Development-only: simulate a gateway callback for a transaction number.",
+        "description": "Development-only: simulate a StreamPay callback for a payment-link ID.",
         "properties": {
+          "payment_link_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Payment Link Id",
+            "type": "string"
+          },
           "status": {
             "default": "PAID",
             "maxLength": 32,
             "minLength": 1,
             "title": "Status",
             "type": "string"
-          },
-          "transaction_no": {
-            "maxLength": 100,
-            "minLength": 1,
-            "title": "Transaction No",
-            "type": "string"
           }
         },
         "required": [
-          "transaction_no"
+          "payment_link_id"
         ],
         "title": "SimulatePaymentRequest",
         "type": "object"
@@ -2523,10 +2523,36 @@
         ]
       }
     },
-    "/api/dev/paylink/simulate": {
+    "/api/dev/ping": {
+      "get": {
+        "description": "Confirm dev routes are registered (development only).",
+        "operationId": "dev_ping_api_dev_ping_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Dev Ping Api Dev Ping Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Development liveness marker",
+        "tags": [
+          "dev"
+        ]
+      }
+    },
+    "/api/dev/streampay/simulate": {
       "post": {
         "description": "Fire a correctly-signed webhook at the REAL handler (development only).\n\nLooks up the intent's amount, builds the exact webhook body the gateway would send,\nsigns it with the fake gateway's test secret, and calls the production webhook\nhandler \u2014 it never bypasses webhook processing.",
-        "operationId": "simulate_payment_api_dev_paylink_simulate_post",
+        "operationId": "simulate_payment_api_dev_streampay_simulate_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -2560,32 +2586,6 @@
           }
         },
         "summary": "Simulate Payment",
-        "tags": [
-          "dev"
-        ]
-      }
-    },
-    "/api/dev/ping": {
-      "get": {
-        "description": "Confirm dev routes are registered (development only).",
-        "operationId": "dev_ping_api_dev_ping_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Dev Ping Api Dev Ping Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Development liveness marker",
         "tags": [
           "dev"
         ]
@@ -3883,18 +3883,18 @@
         ]
       }
     },
-    "/api/webhooks/paylink": {
+    "/api/webhooks/streampay": {
       "post": {
-        "description": "Verify and process a Paylink payment callback (signature over the raw body).",
-        "operationId": "paylink_webhook_api_webhooks_paylink_post",
+        "description": "Verify and process a StreamPay callback (signature over the raw body).",
+        "operationId": "streampay_webhook_api_webhooks_streampay_post",
         "parameters": [
           {
             "in": "header",
-            "name": "x-paylink-signature",
+            "name": "x-webhook-signature",
             "required": false,
             "schema": {
               "default": "",
-              "title": "X-Paylink-Signature",
+              "title": "X-Webhook-Signature",
               "type": "string"
             }
           }
@@ -3921,7 +3921,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Paylink Webhook",
+        "summary": "Streampay Webhook",
         "tags": [
           "webhooks"
         ]

@@ -33,7 +33,7 @@
 - The previously unused `MAX_WITHDRAWAL_AMOUNT` environment setting is now modeled,
   validated, and enforced. The dead `FCM_CREDENTIALS` setting was removed because the
   selected push adapter uses Supabase credentials.
-- Production now refuses missing Paylink, sndr, SMS, push, S3, or CloudFront settings.
+- Production now refuses missing StreamPay, sndr, SMS, push, S3, or CloudFront settings.
 - `FORWARDED_ALLOW_IPS` is documented and present in local Compose. Deployments must use
   exact proxy IPs/CIDRs and must never set a public listener to trust `*`.
 - Alembic autogeneration ignores extension-owned tables but compares every application

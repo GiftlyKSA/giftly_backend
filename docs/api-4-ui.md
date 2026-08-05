@@ -876,5 +876,5 @@ message** (the recipient). Bodies carry no restricted content — fetch details 
 ## 16. Out of scope for the mobile app
 
 These exist but are **not** for the RN client: the admin dashboard (`/admin`, server-
-rendered HTML), the gateway webhook (`POST /api/webhooks/paylink`, called by Paylink,
+rendered HTML), the gateway webhook (`POST /api/webhooks/streampay`, called by StreamPay,
 not the app), and the development-only helpers (`/api/dev/*`). Ignore them.

@@ -27,7 +27,7 @@ async def dev_ping() -> dict[str, str]:
     return {"status": "dev"}
 
 
-@router.post("/paylink/simulate", response_model=WebhookAck)
+@router.post("/streampay/simulate", response_model=WebhookAck)
 async def simulate_payment(request: Request, body: SimulatePaymentRequest) -> WebhookAck:
     """Fire a correctly-signed webhook at the REAL handler (development only).
 
@@ -37,19 +37,21 @@ async def simulate_payment(request: Request, body: SimulatePaymentRequest) -> We
     """
     factory = request.app.state.session_factory
     async with factory() as session:
-        intent = await PaymentRepository(session).lock_intent_by_txn(body.transaction_no)
+        intent = await PaymentRepository(session).lock_intent_by_payment_link(body.payment_link_id)
         if intent is None:
-            raise NotFoundError("Unknown transaction.")
+            raise NotFoundError("Unknown StreamPay payment link.")
         amount = money_str(intent.amount)
 
     payload = {
-        "transaction_no": body.transaction_no,
-        "status": body.status,
-        "amount": amount,
+        "event_type": "PAYMENT_SUCCEEDED" if body.status == "PAID" else "PAYMENT_FAILED",
+        "data": {
+            "payment_link": {"id": body.payment_link_id},
+            "payment": {"status": body.status, "amount": amount},
+        },
     }
     raw_body = json.dumps(payload).encode("utf-8")
     gateway = request.app.state.clients.gateway
-    signature = gateway.sign(raw_body)  # FakePaylinkClient signs with the test secret.
+    signature = gateway.sign(raw_body)  # FakeStreamPayClient signs with the test secret.
 
     async with factory() as session:
         try:
